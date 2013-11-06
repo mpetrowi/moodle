@@ -900,8 +900,10 @@ function filter_get_active_in_context($context) {
              GROUP BY filter
              HAVING MAX(f.active * ctx.depth) > -MIN(f.active * ctx.depth)
          ) active
-         LEFT JOIN {filter_config} fc ON fc.filter = active.filter AND fc.contextid = $context->id
-         ORDER BY active.sortorder";
+         LEFT JOIN {filter_config} fc ON fc.filter = active.filter AND fc.contextid IN ($contextids)
+         LEFT JOIN {context} configctx ON configctx.id = fc.contextid
+         ORDER BY active.sortorder, configctx.depth";
+
     $rs = $DB->get_recordset_sql($sql);
 
     // Massage the data into the specified format to return.
@@ -910,6 +912,8 @@ function filter_get_active_in_context($context) {
         if (!isset($filters[$row->filter])) {
             $filters[$row->filter] = array();
         }
+        // Filter local configs are sorted by context depth, so the last
+        // value we see for each name should be used.
         if (!is_null($row->name)) {
             $filters[$row->filter][$row->name] = $row->value;
         }
