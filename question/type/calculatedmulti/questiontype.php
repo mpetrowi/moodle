@@ -297,4 +297,8 @@ class qtype_calculatedmulti extends qtype_calculated {
         $fs->delete_area_files($contextid, 'qtype_calculatedmulti',
                 'incorrectfeedback', $questionid);
     }
+
+    protected function make_hint($hint) {
+        return question_hint_with_parts::load_from_record($hint);
+    }
 }
