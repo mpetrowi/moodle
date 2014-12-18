@@ -62,7 +62,7 @@ $accessmanager->setup_attempt_page($PAGE);
 $options = $attemptobj->get_display_options(true);
 
 // Check permissions.
-if ($attemptobj->is_own_attempt()) {
+if ($accessmanager->allow_review_attempt($attemptobj->get_attempt())) {
     if (!$attemptobj->is_finished()) {
         redirect($attemptobj->attempt_url(null, $page));
 
@@ -225,6 +225,9 @@ if ($options->marks >= question_display_options::MARK_AND_MAX && quiz_has_grades
         );
     }
 }
+
+// Any optional summary data from the access methods.
+$summarydata = array_merge($summarydata, $accessmanager->get_attempt_summary_data($attemptobj->get_attempt()));
 
 // Any additional summary data from the behaviour.
 $summarydata = array_merge($summarydata, $attemptobj->get_additional_summary_data($options));

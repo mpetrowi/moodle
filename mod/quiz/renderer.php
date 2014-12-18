@@ -694,7 +694,7 @@ class mod_quiz_renderer extends plugin_renderer_base {
      */
     public function view_page($course, $quiz, $cm, $context, $viewobj) {
         $output = '';
-        $output .= $this->view_information($quiz, $cm, $context, $viewobj->infomessages);
+        $output .= $this->view_information($quiz, $cm, $context, $viewobj);
         $output .= $this->view_table($quiz, $context, $viewobj);
         $output .= $this->view_result_info($quiz, $context, $cm, $viewobj);
         $output .= $this->box($this->view_page_buttons($viewobj), 'quizattempt');
@@ -839,10 +839,10 @@ class mod_quiz_renderer extends plugin_renderer_base {
      * @param object $quiz the quiz settings.
      * @param object $cm the course_module object.
      * @param object $context the quiz context.
-     * @param array $messages any access messages that should be described.
+     * @param mod_quiz_view_object $viewobj
      * @return string HTML to output.
      */
-    public function view_information($quiz, $cm, $context, $messages) {
+    public function view_information($quiz, $cm, $context, $viewobj) {
         global $CFG;
 
         $output = '';
@@ -852,8 +852,13 @@ class mod_quiz_renderer extends plugin_renderer_base {
         $output .= $this->quiz_intro($quiz, $cm);
 
         // Output any access messages.
-        if ($messages) {
-            $output .= $this->box($this->access_messages($messages), 'quizinfo');
+        if ($viewobj->infomessages) {
+            $output .= $this->box($this->access_messages($viewobj->infomessages), 'quizinfo');
+        }
+
+        // Output any addition information from access plugins.
+        if ($viewobj->additionalhtml) {
+            $output .= implode("\n", $viewobj->additionalhtml);
         }
 
         // Show number of attempts summary to those who can view reports.
@@ -985,8 +990,13 @@ class mod_quiz_renderer extends plugin_renderer_base {
             }
 
             if ($viewobj->canreviewmine) {
-                $row[] = $viewobj->accessmanager->make_review_link($attemptobj->get_attempt(),
-                        $attemptoptions, $this);
+                // Add link to review attempt if access rules allow review.
+                if ($viewobj->accessmanager->allow_review_attempt($attemptobj->get_attempt())) {
+                    $row[] = $viewobj->accessmanager->make_review_link($attemptobj->get_attempt(),
+                            $attemptoptions, $this);
+                } else {
+                    $row[] = '';
+                }
             }
 
             if ($viewobj->feedbackcolumn && $attemptobj->is_finished()) {
@@ -1192,6 +1202,8 @@ class mod_quiz_links_to_other_attempts implements renderable {
 class mod_quiz_view_object {
     /** @var array $infomessages of messages with information to display about the quiz. */
     public $infomessages;
+    /** @var array $additionalhtml of html strings to be shown above the list of attempts. */
+    public $additionalhtml;
     /** @var array $attempts contains all the user's attempts at this quiz. */
     public $attempts;
     /** @var array $attemptobjs quiz_attempt objects corresponding to $attempts. */

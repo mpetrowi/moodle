@@ -146,6 +146,19 @@ abstract class quiz_access_rule_base {
     }
 
     /**
+     * An attempt has started or is being resumed following a successful pre-flight.
+     * This is a chance to save any preflight data.
+     *
+     * This is not called if no preflight check took place.
+     *
+     * @param int $attemptid the id of the attempt.
+     * @param object $data the preflight form data.
+     */
+    public function save_preflight_data_for_attempt($attemptid, $data) {
+        // Do nothing by default.
+    }
+
+    /**
      * This is called when the current attempt at the quiz is finished. This is
      * used, for example by the password rule, to clear the flag in the session.
      */
@@ -161,6 +174,32 @@ abstract class quiz_access_rule_base {
      *         (may be '' if no message is appropriate).
      */
     public function description() {
+        return '';
+    }
+
+    /**
+     * Provide additional data, if any, for the attempt review screen.  For example,
+     * this could include proctoring information for the attempt.
+     *
+     * In the return value, the array keys are identifiers of the form
+     *   quizaccess_accessrulename_meaningfullkey.
+     * The values are associative arrays with two keys, 'title' and 'content'. Each of
+     * these will be either a string, or a renderable.
+     *
+     * @param stdClass $attempt the attempt object
+     * @return array as described above.
+     */
+    public function get_attempt_summary_data($attempt) {
+        return array();
+    }
+
+    /**
+     * Html to be shown in the quiz view page above the list of attempts.
+     * Plugins can use this to show additional information about the student's attempts.
+     *
+     * @return string html code to include, if any.
+     */
+    public function get_attempts_page_html() {
         return '';
     }
 
@@ -205,6 +244,28 @@ abstract class quiz_access_rule_base {
     }
 
     /**
+     * Check whether the current user can review the attempt.
+     *
+     * The result can be any of:
+     *
+     * - "true" to allow the review unless another access rule prohibits it.
+     * - "false" to prohibit the review.
+     * - "null" to offer no opinion.
+     *
+     * This does not affect the case of someone with 'mod/quiz:viewreports'
+     * reviewing someone elses attempt.  Note that it is possible to give a
+     * a student access to another student's attempt using this mechanism,
+     * although the quiz attempt review page will still only list user's
+     * own attempts.
+     *
+     * @param stdClass $attempt
+     * @return boolean|null
+     */
+    public function allow_review_attempt(stdClass $attempt) {
+        return null;
+    }
+
+    /**
      * @return boolean whether this rule requires that the attemp (and review)
      *      pages must be displayed in a pop-up window.
      */
@@ -245,6 +306,21 @@ abstract class quiz_access_rule_base {
     }
 
     /**
+     * The quiz has updated grades in the quiz_grades table.
+     * This is called after the quiz_grades table is updated and before grades are
+     * actually sent to the course gradebook.
+     * 
+     * Plugins can make use of this to monitor for grade changes, although cron may
+     * be a better approach.
+     *
+     * @param int $quizid the quiz id.
+     * @param int $userid specific user only, 0 means all users.
+     */
+    public static function notify_quiz_update_grades($quizid, $userid = 0) {
+        // Do nothing by default.
+    }
+
+    /**
      * Add any fields that this rule requires to the quiz settings form. This
      * method is called from {@link mod_quiz_mod_form::definition()}, while the
      * security seciton is being built.
@@ -252,6 +328,17 @@ abstract class quiz_access_rule_base {
      * @param MoodleQuickForm $mform the wrapped MoodleQuickForm.
      */
     public static function add_settings_form_fields(
+            mod_quiz_mod_form $quizform, MoodleQuickForm $mform) {
+        // By default do nothing.
+    }
+
+    /**
+     * Update any access rule form fields based on form data.
+     *
+     * @param mod_quiz_mod_form $quizform the quiz settings form that is being built.
+     * @param MoodleQuickForm $mform the wrapped MoodleQuickForm.
+     */
+    public static function settings_form_definition_after_data(
             mod_quiz_mod_form $quizform, MoodleQuickForm $mform) {
         // By default do nothing.
     }

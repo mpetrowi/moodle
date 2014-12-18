@@ -131,6 +131,7 @@ if (!$quizobj->is_preview_user() && $messages) {
             $output->access_messages($messages));
 }
 
+$preflightdata = null;
 if ($accessmanager->is_preflight_check_required($currentattemptid)) {
     // Need to do some checks before allowing the user to continue.
     $mform = $accessmanager->get_preflight_check_form(
@@ -139,8 +140,9 @@ if ($accessmanager->is_preflight_check_required($currentattemptid)) {
     if ($mform->is_cancelled()) {
         $accessmanager->back_to_view_page($output);
 
-    } else if (!$mform->get_data()) {
-
+    }
+    $preflightdata = $mform->get_data();
+    if (!$preflightdata) {
         // Form not submitted successfully, re-display it and stop.
         $PAGE->set_url($quizobj->start_attempt_url($page));
         $PAGE->set_title($quizobj->get_quiz_name());
@@ -152,11 +154,16 @@ if ($accessmanager->is_preflight_check_required($currentattemptid)) {
         echo $output->start_attempt_page($quizobj, $mform);
         die();
     }
-
+    
     // Pre-flight check passed.
     $accessmanager->notify_preflight_check_passed($currentattemptid);
 }
+
 if ($currentattemptid) {
+    // Notify access plugins of any preflight data on attempt resume.
+    if ($preflightdata) {
+        $accessmanager->save_preflight_data_for_attempt($currentattemptid, $preflightdata);
+    }
     if ($lastattempt->state == quiz_attempt::OVERDUE) {
         redirect($quizobj->summary_url($lastattempt->id));
     } else {
@@ -183,6 +190,11 @@ if (!($quizobj->get_quiz()->attemptonlast && $lastattempt)) {
 $transaction = $DB->start_delegated_transaction();
 
 $attempt = quiz_attempt_save_started($quizobj, $quba, $attempt);
+
+// Notify access plugins of any preflight data on new attempt.
+if ($preflightdata) {
+    $accessmanager->save_preflight_data_for_attempt($attempt->id, $preflightdata);
+}
 
 $transaction->allow_commit();
 

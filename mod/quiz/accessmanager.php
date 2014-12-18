@@ -111,6 +111,21 @@ class quiz_access_manager {
     }
 
     /**
+     * Update access rule form fields based on form data.
+     *
+     * @param mod_quiz_mod_form $quizform the quiz settings form that is being built.
+     * @param MoodleQuickForm $mform the wrapped MoodleQuickForm.
+     */
+    public static function settings_form_definition_after_data(
+            mod_quiz_mod_form $quizform, MoodleQuickForm $mform) {
+
+        foreach (self::get_rule_classes() as $rule) {
+            $rule::settings_form_definition_after_data($quizform, $mform);
+        }
+    }
+
+
+    /**
      * The the options for the Browser security settings menu.
      *
      * @return array key => lang string.
@@ -310,6 +325,42 @@ class quiz_access_manager {
     }
 
     /**
+     * Provide additional data, if any, for the summary area at the top of the
+     * attempt review screen.  For example, this could include proctoring information
+     * for the attempt.
+     *
+     * In the return value, the array keys are identifiers of the form
+     *   quizaccess_accessrulename_meaningfullkey.
+     * The values are associative arrays with two keys, 'title' and 'content'. Each of
+     * these will be either a string, or a renderable.
+     *
+     * @param stdClass $attempt the attempt object
+     * @return array as described above.
+     */
+    public function get_attempt_summary_data($attempt) {
+        $result = array();
+        foreach ($this->rules as $rule) {
+            $result = array_merge($result, $rule->get_attempt_summary_data($attempt));
+        }
+        return $result;
+    }
+
+    /**
+     * Provide additional html to be included above the quiz attempts table on the
+     * review page. This can be used to add additional information to be shown to a
+     * student regarding their quiz attempts.
+     *
+     * @return array of html strings to be displayed.
+     */
+    public function get_attempts_page_html() {
+        $result = array();
+        foreach ($this->rules as $rule) {
+            $result[] = $rule->get_attempts_page_html();
+        }
+        return $result;
+    }
+
+    /**
      * Whether or not a user should be allowed to start a new attempt at this quiz now.
      * If there are any restrictions in force now, return an array of reasons why access
      * should be blocked. If access is OK, return false.
@@ -343,6 +394,36 @@ class quiz_access_manager {
             $reasons = $this->accumulate_messages($reasons, $rule->prevent_access());
         }
         return $reasons;
+    }
+
+    /**
+     * Check whether the current user can review the given attempt.
+     *
+     * This does not need to handle the case of someone with 'mod/quiz:viewreports'
+     * reviewing someone elses attempt.
+     *
+     * @param stdClass $attempt
+     * @return boolean
+     */
+    public function allow_review_attempt($attempt) {
+        global $USER;
+        $allow = false;
+        // Can review own attempt by default.
+        if ($attempt->userid == $USER->id) {
+            $allow = true;
+        }
+        foreach ($this->rules as $rule) {
+            $result = $rule->allow_review_attempt($attempt);
+            if (!is_null($result)) {
+                if ($result) {
+                    $allow = true;
+                } else {
+                    // Prohibit review.
+                    return false;
+                }
+            }
+        }
+        return $allow;
     }
 
     /**
@@ -386,12 +467,38 @@ class quiz_access_manager {
     }
 
     /**
+     * Inform the rules of any preflight data gathered for a new or resumed attempt.
+     *
+     * @param int $attemptid the id of the attempt.
+     * @param object $data the preflight form data.
+     */
+    public function save_preflight_data_for_attempt($attemptid, $data) {
+        foreach ($this->rules as $rule) {
+            $rule->save_preflight_data_for_attempt($attemptid, $data);
+        }
+    }
+
+    /**
      * Inform the rules that the current attempt is finished. This is use, for example
      * by the password rule, to clear the flag in the session.
      */
     public function current_attempt_finished() {
         foreach ($this->rules as $rule) {
             $rule->current_attempt_finished();
+        }
+    }
+
+    /**
+     * Inform the rules that the quiz has updated grades in the quiz_grades table.  This
+     * is called after the quiz_grades table is updated, but before data is actually sent
+     * to the course gradebook.
+     *
+     * @param int $quizid the quiz id.
+     * @param int $userid specific user only, 0 means all users.
+     */
+    public static function notify_quiz_update_grades($quizid, $userid = 0) {
+        foreach (self::get_rule_classes() as $rule) {
+            $rule::notify_quiz_update_grades($quizid, $userid);
         }
     }
 

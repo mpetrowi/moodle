@@ -674,6 +674,9 @@ function quiz_update_grades($quiz, $userid = 0, $nullifnone = true) {
     global $CFG, $DB;
     require_once($CFG->libdir . '/gradelib.php');
 
+    // Notify quiz access plugins about the grade update.
+    quiz_access_manager::notify_quiz_update_grades($quiz->id, $userid);
+
     if ($quiz->grade == 0) {
         quiz_grade_item_update($quiz);
 

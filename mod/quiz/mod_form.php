@@ -399,6 +399,17 @@ class mod_quiz_mod_form extends moodleform_mod {
         $PAGE->requires->yui_module('moodle-mod_quiz-modform', 'M.mod_quiz.modform.init');
     }
 
+    function definition_after_data() {
+        $mform = $this->_form;
+
+        parent::definition_after_data();
+
+        // Let access rules update their elements based on the form data.
+        quiz_access_manager::settings_form_definition_after_data($this, $mform);
+
+    }
+
+
     protected function add_review_options_group($mform, $quizconfig, $whenname,
             $when, $withhelp = false) {
         global $OUTPUT;

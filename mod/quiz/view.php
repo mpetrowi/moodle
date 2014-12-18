@@ -183,6 +183,7 @@ $viewobj->popupoptions = $accessmanager->get_popup_options();
 
 // Display information about this quiz.
 $viewobj->infomessages = $viewobj->accessmanager->describe_rules();
+$viewobj->additionalhtml = $viewobj->accessmanager->get_attempts_page_html();
 if ($quiz->attempts != 1) {
     $viewobj->infomessages[] = get_string('gradingmethod', 'quiz',
             quiz_get_grading_option_name($quiz->grademethod));
