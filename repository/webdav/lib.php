@@ -18,7 +18,7 @@
 /**
  * This plugin is used to access webdav files
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository_webdav
  * @copyright  2010 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -29,7 +29,7 @@ require_once($CFG->libdir.'/webdavlib.php');
 /**
  * repository_webdav class
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository_webdav
  * @copyright  2009 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -71,17 +71,14 @@ class repository_webdav extends repository {
         return true;
     }
     public function get_file($url, $title = '') {
-        global $CFG;
         $url = urldecode($url);
-        $path = $this->prepare_file($title);
-        $buffer = '';
+        // Prepare a file with an arbitrary name - cannot be $title because of special chars (cf. MDL-57002).
+        $path = $this->prepare_file(uniqid());
         if (!$this->dav->open()) {
             return false;
         }
         $webdavpath = rtrim('/'.ltrim($this->options['webdav_path'], '/ '), '/ '); // without slash in the end
-        $this->dav->get($webdavpath. $url, $buffer);
-        $fp = fopen($path, 'wb');
-        fwrite($fp, $buffer);
+        $this->dav->get_file($webdavpath. $url, $path);
         return array('path'=>$path);
     }
     public function global_search() {
@@ -124,6 +121,9 @@ class repository_webdav extends repository {
                 $v['lastmodified'] = null;
             }
 
+            // Remove the server URL from the path (if present), otherwise links will not work - MDL-37014
+            $server = preg_quote($this->options['webdav_server']);
+            $v['href'] = preg_replace("#https?://{$server}#", '', $v['href']);
             // Extracting object title from absolute path
             $v['href'] = substr(urldecode($v['href']), strlen($webdavpath));
             $title = substr($v['href'], strlen($path));
@@ -133,7 +133,7 @@ class repository_webdav extends repository {
                 if ($path != $v['href']) {
                     $folders[strtoupper($title)] = array(
                         'title'=>rtrim($title, '/'),
-                        'thumbnail'=>$OUTPUT->pix_url(file_folder_icon(90))->out(false),
+                        'thumbnail'=>$OUTPUT->image_url(file_folder_icon(90))->out(false),
                         'children'=>array(),
                         'datemodified'=>$v['lastmodified'],
                         'path'=>$v['href']
@@ -144,7 +144,7 @@ class repository_webdav extends repository {
                 $size = !empty($v['getcontentlength'])? $v['getcontentlength']:'';
                 $files[strtoupper($title)] = array(
                     'title'=>$title,
-                    'thumbnail' => $OUTPUT->pix_url(file_extension_icon($title, 90))->out(false),
+                    'thumbnail' => $OUTPUT->image_url(file_extension_icon($title, 90))->out(false),
                     'size'=>$size,
                     'datemodified'=>$v['lastmodified'],
                     'source'=>$v['href']
@@ -167,9 +167,11 @@ class repository_webdav extends repository {
 
         $mform->addElement('text', 'webdav_server', get_string('webdav_server', 'repository_webdav'), array('size' => '40'));
         $mform->addRule('webdav_server', get_string('required'), 'required', null, 'client');
+        $mform->setType('webdav_server', PARAM_HOST);
 
         $mform->addElement('text', 'webdav_path', get_string('webdav_path', 'repository_webdav'), array('size' => '40'));
         $mform->addRule('webdav_path', get_string('required'), 'required', null, 'client');
+        $mform->setType('webdav_path', PARAM_PATH);
 
         $choices = array();
         $choices['none'] = get_string('none');
@@ -178,12 +180,24 @@ class repository_webdav extends repository {
         $mform->addElement('select', 'webdav_auth', get_string('authentication', 'admin'), $choices);
         $mform->addRule('webdav_auth', get_string('required'), 'required', null, 'client');
 
-
         $mform->addElement('text', 'webdav_port', get_string('webdav_port', 'repository_webdav'), array('size' => '40'));
+        $mform->setType('webdav_port', PARAM_INT);
         $mform->addElement('text', 'webdav_user', get_string('webdav_user', 'repository_webdav'), array('size' => '40'));
-        $mform->addElement('text', 'webdav_password', get_string('webdav_password', 'repository_webdav'), array('size' => '40'));
+        $mform->setType('webdav_user', PARAM_RAW_TRIMMED); // Not for us to clean.
+        $mform->addElement('password', 'webdav_password', get_string('webdav_password', 'repository_webdav'),
+            array('size' => '40'));
     }
     public function supported_returntypes() {
         return (FILE_INTERNAL | FILE_EXTERNAL);
+    }
+
+
+    /**
+     * Is this repository accessing private data?
+     *
+     * @return bool
+     */
+    public function contains_private_data() {
+        return false;
     }
 }

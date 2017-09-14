@@ -24,7 +24,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-require_once(dirname(dirname(__FILE__)) . '/message/lib.php');
+require_once(__DIR__ . '/../message/lib.php');
 
 /**
  * Called when a message provider wants to send a message.
@@ -47,27 +47,70 @@ require_once(dirname(dirname(__FILE__)) . '/message/lib.php');
  *  contexturl string if this is a notification then you can specify a url to view the event. For example the forum post the user is being notified of.
  *  contexturlname string the display text for contexturl
  *
+ * Note: processor failure is is not reported as false return value,
+ *       earlier versions did not do it consistently either.
+ *
+ * @todo MDL-55449 Drop support for stdClass in Moodle 3.6
  * @category message
- * @param object $eventdata information about the message (component, userfrom, userto, ...)
- * @return mixed the integer ID of the new message or false if there was a problem with a processor
+ * @param \core\message\message $eventdata information about the message (component, userfrom, userto, ...)
+ * @return mixed the integer ID of the new message or false if there was a problem with submitted data
  */
 function message_send($eventdata) {
     global $CFG, $DB;
 
+    // TODO MDL-55449 Drop support for stdClass in Moodle 3.6.
+    if ($eventdata instanceof \stdClass) {
+        if (!isset($eventdata->courseid)) {
+            $eventdata->courseid = null;
+        }
+
+        debugging('eventdata as \stdClass is deprecated. Please use core\message\message instead.', DEBUG_DEVELOPER);
+    }
+
     //new message ID to return
     $messageid = false;
 
-    //TODO: we need to solve problems with database transactions here somehow, for now we just prevent transactions - sorry
-    $DB->transactions_forbidden();
+    // Fetch default (site) preferences
+    $defaultpreferences = get_message_output_default_preferences();
+    $preferencebase = $eventdata->component.'_'.$eventdata->name;
+    // If message provider is disabled then don't do any processing.
+    if (!empty($defaultpreferences->{$preferencebase.'_disable'})) {
+        return $messageid;
+    }
 
-    if (is_number($eventdata->userto)) {
-        $eventdata->userto = $DB->get_record('user', array('id' => $eventdata->userto));
+    // By default a message is a notification. Only personal/private messages aren't notifications.
+    if (!isset($eventdata->notification)) {
+        $eventdata->notification = 1;
     }
-    if (is_int($eventdata->userfrom)) {
-        $eventdata->userfrom = $DB->get_record('user', array('id' => $eventdata->userfrom));
+
+    if (!is_object($eventdata->userto)) {
+        $eventdata->userto = core_user::get_user($eventdata->userto);
     }
-    if (!isset($eventdata->userto->auth) or !isset($eventdata->userto->suspended) or !isset($eventdata->userto->deleted)) {
-        $eventdata->userto = $DB->get_record('user', array('id' => $eventdata->userto->id));
+    if (!is_object($eventdata->userfrom)) {
+        $eventdata->userfrom = core_user::get_user($eventdata->userfrom);
+    }
+    if (!$eventdata->userto) {
+        debugging('Attempt to send msg to unknown user', DEBUG_NORMAL);
+        return false;
+    }
+    if (!$eventdata->userfrom) {
+        debugging('Attempt to send msg from unknown user', DEBUG_NORMAL);
+        return false;
+    }
+
+    // Verify all necessary data fields are present.
+    if (!isset($eventdata->userto->auth) or !isset($eventdata->userto->suspended)
+            or !isset($eventdata->userto->deleted) or !isset($eventdata->userto->emailstop)) {
+
+        debugging('Necessary properties missing in userto object, fetching full record', DEBUG_DEVELOPER);
+        $eventdata->userto = core_user::get_user($eventdata->userto->id);
+    }
+
+    $usertoisrealuser = (core_user::is_real_user($eventdata->userto->id) != false);
+    // If recipient is internal user (noreply user), and emailstop is set then don't send any msg.
+    if (!$usertoisrealuser && !empty($eventdata->userto->emailstop)) {
+        debugging('Attempt to send msg to internal (noreply) user', DEBUG_NORMAL);
+        return false;
     }
 
     //after how long inactive should the user be considered logged off?
@@ -86,6 +129,7 @@ function message_send($eventdata) {
 
     // Create the message object
     $savemessage = new stdClass();
+    $savemessage->courseid          = $eventdata->courseid;
     $savemessage->useridfrom        = $eventdata->userfrom->id;
     $savemessage->useridto          = $eventdata->userto->id;
     $savemessage->subject           = $eventdata->subject;
@@ -93,21 +137,18 @@ function message_send($eventdata) {
     $savemessage->fullmessageformat = $eventdata->fullmessageformat;
     $savemessage->fullmessagehtml   = $eventdata->fullmessagehtml;
     $savemessage->smallmessage      = $eventdata->smallmessage;
-
-    if (!empty($eventdata->notification)) {
-        $savemessage->notification = $eventdata->notification;
-    } else {
-        $savemessage->notification = 0;
-    }
+    $savemessage->notification      = $eventdata->notification;
+    $savemessage->eventtype         = $eventdata->name;
+    $savemessage->component         = $eventdata->component;
 
     if (!empty($eventdata->contexturl)) {
-        $savemessage->contexturl = $eventdata->contexturl;
+        $savemessage->contexturl = (string)$eventdata->contexturl;
     } else {
         $savemessage->contexturl = null;
     }
 
     if (!empty($eventdata->contexturlname)) {
-        $savemessage->contexturlname = $eventdata->contexturlname;
+        $savemessage->contexturlname = (string)$eventdata->contexturlname;
     } else {
         $savemessage->contexturlname = null;
     }
@@ -116,7 +157,7 @@ function message_send($eventdata) {
 
     if (PHPUNIT_TEST and class_exists('phpunit_util')) {
         // Add some more tests to make sure the normal code can actually work.
-        $componentdir = get_component_directory($eventdata->component);
+        $componentdir = core_component::get_component_directory($eventdata->component);
         if (!$componentdir or !is_dir($componentdir)) {
             throw new coding_exception('Invalid component specified in message-send(): '.$eventdata->component);
         }
@@ -140,25 +181,39 @@ function message_send($eventdata) {
         }
     }
 
-    // Fetch enabled processors
-    $processors = get_message_processors(true);
-    // Fetch default (site) preferences
-    $defaultpreferences = get_message_output_default_preferences();
+    // Fetch enabled processors.
+    // If we are dealing with a message some processors may want to handle it regardless of user and site settings.
+    if (empty($savemessage->notification)) {
+        $processors = array_filter(get_message_processors(false), function($processor) {
+            if ($processor->object->force_process_messages()) {
+                return true;
+            }
+
+            return ($processor->enabled && $processor->configured);
+        });
+    } else {
+        $processors = get_message_processors(true);
+    }
 
     // Preset variables
     $processorlist = array();
-    $preferencebase = $eventdata->component.'_'.$eventdata->name;
     // Fill in the array of processors to be used based on default and user preferences
     foreach ($processors as $processor) {
+        // Skip adding processors for internal user, if processor doesn't support sending message to internal user.
+        if (!$usertoisrealuser && !$processor->object->can_send_to_any_users()) {
+            continue;
+        }
+
         // First find out permissions
         $defaultpreference = $processor->name.'_provider_'.$preferencebase.'_permitted';
         if (isset($defaultpreferences->{$defaultpreference})) {
             $permitted = $defaultpreferences->{$defaultpreference};
         } else {
-            //MDL-25114 They supplied an $eventdata->component $eventdata->name combination which doesn't
-            //exist in the message_provider table (thus there is no default settings for them)
-            $preferrormsg = get_string('couldnotfindpreference', 'message', $defaultpreference);
-            throw new coding_exception($preferrormsg,'blah');
+            // MDL-25114 They supplied an $eventdata->component $eventdata->name combination which doesn't
+            // exist in the message_provider table (thus there is no default settings for them).
+            $preferrormsg = "Could not load preference $defaultpreference. Make sure the component and name you supplied
+                    to message_send() are valid.";
+            throw new coding_exception($preferrormsg);
         }
 
         // Find out if user has configured this output
@@ -170,21 +225,17 @@ function message_send($eventdata) {
             debugging('Attempt to force message delivery to user who has "'.$processor->name.'" output unconfigured', DEBUG_NORMAL);
         }
 
-        // Warn developers that necessary data is missing regardless of how the processors are configured
-        if (!isset($eventdata->userto->emailstop)) {
-            debugging('userto->emailstop is not set. Retrieving it from the user table');
-            $eventdata->userto->emailstop = $DB->get_field('user', 'emailstop', array('id'=>$eventdata->userto->id));
-        }
-
         // Populate the list of processors we will be using
-        if ($permitted == 'forced' && $userisconfigured) {
+        if (empty($savemessage->notification) && $processor->object->force_process_messages()) {
+            $processorlist[] = $processor->name;
+        } else if ($permitted == 'forced' && $userisconfigured) {
             // An admin is forcing users to use this message processor. Use this processor unconditionally.
             $processorlist[] = $processor->name;
         } else if ($permitted == 'permitted' && $userisconfigured && !$eventdata->userto->emailstop) {
             // User has not disabled notifications
             // See if user set any notification preferences, otherwise use site default ones
             $userpreferencename = 'message_provider_'.$preferencebase.'_'.$userstate;
-            if ($userpreference = get_user_preferences($userpreferencename, null, $eventdata->userto->id)) {
+            if ($userpreference = get_user_preferences($userpreferencename, null, $eventdata->userto)) {
                 if (in_array($processor->name, explode(',', $userpreference))) {
                     $processorlist[] = $processor->name;
                 }
@@ -196,39 +247,21 @@ function message_send($eventdata) {
         }
     }
 
-    if (empty($processorlist) && $savemessage->notification) {
-        //if they have deselected all processors and its a notification mark it read. The user doesnt want to be bothered
-        $savemessage->timeread = time();
-        $messageid = $DB->insert_record('message_read', $savemessage);
-    } else {                        // Process the message
-        // Store unread message just in case we can not send it
-        $messageid = $savemessage->id = $DB->insert_record('message', $savemessage);
-        $eventdata->savedmessageid = $savemessage->id;
-
-        // Try to deliver the message to each processor
-        if (!empty($processorlist)) {
-            foreach ($processorlist as $procname) {
-                if (!$processors[$procname]->object->send_message($eventdata)) {
-                    debugging('Error calling message processor '.$procname);
-                    $messageid = false;
-                }
-            }
-
-            //if messaging is disabled and they previously had forum notifications handled by the popup processor
-            //or any processor that puts a row in message_working then the notification will remain forever
-            //unread. To prevent this mark the message read if messaging is disabled
-            if (empty($CFG->messaging)) {
-                require_once($CFG->dirroot.'/message/lib.php');
-                $messageid = message_mark_message_read($savemessage, time());
-            } else if ( $DB->count_records('message_working', array('unreadmessageid' => $savemessage->id)) == 0){
-                //if there is no more processors that want to process this we can move message to message_read
-                require_once($CFG->dirroot.'/message/lib.php');
-                $messageid = message_mark_message_read($savemessage, time(), true);
-            }
-        }
+    // Only cache messages, not notifications.
+    if (empty($savemessage->notification)) {
+        // Cache the timecreated value of the last message between these two users.
+        $cache = cache::make('core', 'message_time_last_message_between_users');
+        $key = \core_message\helper::get_last_message_time_created_cache_key($savemessage->useridfrom,
+            $savemessage->useridto);
+        $cache->set($key, $savemessage->timecreated);
     }
 
-    return $messageid;
+    // Store unread message just in case we get a fatal error any time later.
+    $savemessage->id = $DB->insert_record('message', $savemessage);
+    $eventdata->savedmessageid = $savemessage->id;
+
+    // Let the manager do the sending or buffering when db transaction in progress.
+    return \core\message\manager::send_message($eventdata, $savemessage, $processorlist);
 }
 
 
@@ -283,6 +316,7 @@ function message_update_providers($component='moodle') {
         $DB->delete_records('message_providers', array('id' => $dbprovider->id));
         $DB->delete_records_select('config_plugins', "plugin = 'message' AND ".$DB->sql_like('name', '?', false), array("%_provider_{$component}_{$dbprovider->name}_%"));
         $DB->delete_records_select('user_preferences', $DB->sql_like('name', '?', false), array("message_provider_{$component}_{$dbprovider->name}_%"));
+        cache_helper::invalidate_by_definition('core', 'config', array(), 'message');
     }
 
     return true;
@@ -390,22 +424,6 @@ function message_set_default_message_preference($component, $messagename, $filep
 }
 
 /**
- * This function has been deprecated please use {@link message_get_providers_for_user()} instead.
- *
- * Returns the active providers for the current user, based on capability
- *
- * @see message_get_providers_for_user()
- * @deprecated since 2.1
- * @todo Remove in 2.5 (MDL-34454)
- * @return array An array of message providers
- */
-function message_get_my_providers() {
-    global $USER;
-    debugging('message_get_my_providers is deprecated please update your code', DEBUG_DEVELOPER);
-    return message_get_providers_for_user($USER->id);
-}
-
-/**
  * Returns the active providers for the user specified, based on capability
  *
  * @param int $userid id of user
@@ -414,32 +432,98 @@ function message_get_my_providers() {
 function message_get_providers_for_user($userid) {
     global $DB, $CFG;
 
-    $systemcontext = context_system::instance();
-
     $providers = get_message_providers();
 
-    // Remove all the providers we aren't allowed to see now
-    foreach ($providers as $providerid => $provider) {
-        if (!empty($provider->capability)) {
-            if (!has_capability($provider->capability, $systemcontext, $userid)) {
-                unset($providers[$providerid]);   // Not allowed to see this
-                continue;
+    // Ensure user is not allowed to configure instantmessage if it is globally disabled.
+    if (!$CFG->messaging) {
+        foreach ($providers as $providerid => $provider) {
+            if ($provider->name == 'instantmessage') {
+                unset($providers[$providerid]);
+                break;
             }
         }
+    }
 
-        // Ensure user is not allowed to configure instantmessage if it is globally disabled.
-        if (!$CFG->messaging && $provider->name == 'instantmessage') {
+    // If the component is an enrolment plugin, check it is enabled
+    foreach ($providers as $providerid => $provider) {
+        list($type, $name) = core_component::normalize_component($provider->component);
+        if ($type == 'enrol' && !enrol_is_enabled($name)) {
             unset($providers[$providerid]);
+        }
+    }
+
+    // Now we need to check capabilities. We need to eliminate the providers
+    // where the user does not have the corresponding capability anywhere.
+    // Here we deal with the common simple case of the user having the
+    // capability in the system context. That handles $CFG->defaultuserroleid.
+    // For the remaining providers/capabilities, we need to do a more complex
+    // query involving all overrides everywhere.
+    $unsureproviders = array();
+    $unsurecapabilities = array();
+    $systemcontext = context_system::instance();
+    foreach ($providers as $providerid => $provider) {
+        if (empty($provider->capability) || has_capability($provider->capability, $systemcontext, $userid)) {
+            // The provider is relevant to this user.
             continue;
         }
 
-        // If the component is an enrolment plugin, check it is enabled
-        list($type, $name) = normalize_component($provider->component);
-        if ($type == 'enrol') {
-            if (!enrol_is_enabled($name)) {
-                unset($providers[$providerid]);
-                continue;
-            }
+        $unsureproviders[$providerid] = $provider;
+        $unsurecapabilities[$provider->capability] = 1;
+        unset($providers[$providerid]);
+    }
+
+    if (empty($unsureproviders)) {
+        // More complex checks are not required.
+        return $providers;
+    }
+
+    // Now check the unsure capabilities.
+    list($capcondition, $params) = $DB->get_in_or_equal(
+            array_keys($unsurecapabilities), SQL_PARAMS_NAMED);
+    $params['userid'] = $userid;
+
+    $sql = "SELECT DISTINCT rc.capability, 1
+
+              FROM {role_assignments} ra
+              JOIN {context} actx ON actx.id = ra.contextid
+              JOIN {role_capabilities} rc ON rc.roleid = ra.roleid
+              JOIN {context} cctx ON cctx.id = rc.contextid
+
+             WHERE ra.userid = :userid
+               AND rc.capability $capcondition
+               AND rc.permission > 0
+               AND (".$DB->sql_concat('actx.path', "'/'")." LIKE ".$DB->sql_concat('cctx.path', "'/%'").
+               " OR ".$DB->sql_concat('cctx.path', "'/'")." LIKE ".$DB->sql_concat('actx.path', "'/%'").")";
+
+    if (!empty($CFG->defaultfrontpageroleid)) {
+        $frontpagecontext = context_course::instance(SITEID);
+
+        list($capcondition2, $params2) = $DB->get_in_or_equal(
+                array_keys($unsurecapabilities), SQL_PARAMS_NAMED);
+        $params = array_merge($params, $params2);
+        $params['frontpageroleid'] = $CFG->defaultfrontpageroleid;
+        $params['frontpagepathpattern'] = $frontpagecontext->path . '/';
+
+        $sql .= "
+             UNION
+
+            SELECT DISTINCT rc.capability, 1
+
+              FROM {role_capabilities} rc
+              JOIN {context} cctx ON cctx.id = rc.contextid
+
+             WHERE rc.roleid = :frontpageroleid
+               AND rc.capability $capcondition2
+               AND rc.permission > 0
+               AND ".$DB->sql_concat('cctx.path', "'/'")." LIKE :frontpagepathpattern";
+    }
+
+    $relevantcapabilities = $DB->get_records_sql_menu($sql, $params);
+
+    // Add back any providers based on the detailed capability check.
+    foreach ($unsureproviders as $providerid => $provider) {
+        if (array_key_exists($provider->capability, $relevantcapabilities)) {
+            $providers[$providerid] = $provider;
         }
     }
 
@@ -473,7 +557,7 @@ function message_get_providers_from_db($component) {
  * @return array An array of message providers or empty array if not exists
  */
 function message_get_providers_from_file($component) {
-    $defpath = get_component_directory($component).'/db/messages.php';
+    $defpath = core_component::get_component_directory($component).'/db/messages.php';
 
     $messageproviders = array();
 
@@ -507,6 +591,8 @@ function message_provider_uninstall($component) {
     $DB->delete_records_select('config_plugins', "plugin = 'message' AND ".$DB->sql_like('name', '?', false), array("%_provider_{$component}_%"));
     $DB->delete_records_select('user_preferences', $DB->sql_like('name', '?', false), array("message_provider_{$component}_%"));
     $transaction->allow_commit();
+    // Purge all messaging settings from the caches. They are stored by plugin so we have to clear all message settings.
+    cache_helper::invalidate_by_definition('core', 'config', array(), 'message');
 }
 
 /**
@@ -524,4 +610,6 @@ function message_processor_uninstall($name) {
     // defaults, they will be removed on the next attempt to update the preferences
     $DB->delete_records_select('config_plugins', "plugin = 'message' AND ".$DB->sql_like('name', '?', false), array("{$name}_provider_%"));
     $transaction->allow_commit();
+    // Purge all messaging settings from the caches. They are stored by plugin so we have to clear all message settings.
+    cache_helper::invalidate_by_definition('core', 'config', array(), array('message', "message_{$name}"));
 }

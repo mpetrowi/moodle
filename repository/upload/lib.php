@@ -18,7 +18,7 @@
 /**
  * This plugin is used to upload files
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository_upload
  * @copyright  2010 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -28,7 +28,7 @@ require_once($CFG->dirroot . '/repository/lib.php');
 /**
  * A repository plugin to allow user uploading files
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository_upload
  * @copyright  2009 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -57,9 +57,10 @@ class repository_upload extends repository {
         $itemid   = optional_param('itemid', 0, PARAM_INT);
         $license  = optional_param('license', $CFG->sitedefaultlicense, PARAM_TEXT);
         $author   = optional_param('author', '', PARAM_TEXT);
+        $areamaxbytes = optional_param('areamaxbytes', FILE_AREA_MAX_BYTES_UNLIMITED, PARAM_INT);
         $overwriteexisting = optional_param('overwrite', false, PARAM_BOOL);
 
-        return $this->process_upload($saveas_filename, $maxbytes, $types, $savepath, $itemid, $license, $author, $overwriteexisting);
+        return $this->process_upload($saveas_filename, $maxbytes, $types, $savepath, $itemid, $license, $author, $overwriteexisting, $areamaxbytes);
     }
 
     /**
@@ -72,9 +73,11 @@ class repository_upload extends repository {
      * @param string $license optional the license to use for this file
      * @param string $author optional the name of the author of this file
      * @param bool $overwriteexisting optional user has asked to overwrite the existing file
+     * @param int $areamaxbytes maximum size of the file area.
      * @return object containing details of the file uploaded
      */
-    public function process_upload($saveas_filename, $maxbytes, $types = '*', $savepath = '/', $itemid = 0, $license = null, $author = '', $overwriteexisting = false) {
+    public function process_upload($saveas_filename, $maxbytes, $types = '*', $savepath = '/', $itemid = 0,
+            $license = null, $author = '', $overwriteexisting = false, $areamaxbytes = FILE_AREA_MAX_BYTES_UNLIMITED) {
         global $USER, $CFG;
 
         if ((is_array($types) and in_array('*', $types)) or $types == '*') {
@@ -138,12 +141,7 @@ class repository_upload extends repository {
             }
         }
 
-        // scan the files, throws exception and deletes if virus found
-        // this is tricky because clamdscan daemon might not be able to access the files
-        $permissions = fileperms($_FILES[$elname]['tmp_name']);
-        @chmod($_FILES[$elname]['tmp_name'], $CFG->filepermissions);
-        self::antivir_scan_file($_FILES[$elname]['tmp_name'], $_FILES[$elname]['name'], true);
-        @chmod($_FILES[$elname]['tmp_name'], $permissions);
+        \core\antivirus\manager::scan_file($_FILES[$elname]['tmp_name'], $_FILES[$elname]['name'], true);
 
         // {@link repository::build_source_field()}
         $sourcefield = $this->get_file_source_info($_FILES[$elname]['name']);
@@ -193,19 +191,27 @@ class repository_upload extends repository {
         }
 
         if (($maxbytes!==-1) && (filesize($_FILES[$elname]['tmp_name']) > $maxbytes)) {
-            throw new file_exception('maxbytes');
+            $maxbytesdisplay = display_size($maxbytes);
+            throw new file_exception('maxbytesfile', (object) array('file' => $record->filename,
+                                                                    'size' => $maxbytesdisplay));
         }
+
+        if (file_is_draft_area_limit_reached($record->itemid, $areamaxbytes, filesize($_FILES[$elname]['tmp_name']))) {
+            throw new file_exception('maxareabytes');
+        }
+
         $record->contextid = $context->id;
         $record->userid    = $USER->id;
 
         if (repository::draftfile_exists($record->itemid, $record->filepath, $record->filename)) {
+            $existingfilename = $record->filename;
+            $unused_filename = repository::get_unused_filename($record->itemid, $record->filepath, $record->filename);
+            $record->filename = $unused_filename;
+            $stored_file = $fs->create_file_from_pathname($record, $_FILES[$elname]['tmp_name']);
             if ($overwriteexisting) {
-                repository::delete_tempfile_from_draft($record->itemid, $record->filepath, $record->filename);
+                repository::overwrite_existing_draftfile($record->itemid, $record->filepath, $existingfilename, $record->filepath, $record->filename);
+                $record->filename = $existingfilename;
             } else {
-                $existingfilename = $record->filename;
-                $unused_filename = repository::get_unused_filename($record->itemid, $record->filepath, $record->filename);
-                $record->filename = $unused_filename;
-                $stored_file = $fs->create_file_from_pathname($record, $_FILES[$elname]['tmp_name']);
                 $event = array();
                 $event['event'] = 'fileexists';
                 $event['newfile'] = new stdClass;
@@ -219,9 +225,9 @@ class repository_upload extends repository {
                 $event['existingfile']->url      = moodle_url::make_draftfile_url($record->itemid, $record->filepath, $existingfilename)->out(false);
                 return $event;
             }
+        } else {
+            $stored_file = $fs->create_file_from_pathname($record, $_FILES[$elname]['tmp_name']);
         }
-
-        $stored_file = $fs->create_file_from_pathname($record, $_FILES[$elname]['tmp_name']);
 
         return array(
             'url'=>moodle_url::make_draftfile_url($record->itemid, $record->filepath, $record->filename)->out(false),
@@ -279,5 +285,14 @@ class repository_upload extends repository {
      */
     public function supported_returntypes() {
         return FILE_INTERNAL;
+    }
+
+    /**
+     * Is this repository accessing private data?
+     *
+     * @return bool
+     */
+    public function contains_private_data() {
+        return false;
     }
 }

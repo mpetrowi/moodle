@@ -18,8 +18,7 @@
 /**
  * Submit an assignment or edit the already submitted work
  *
- * @package    mod
- * @subpackage workshop
+ * @package    mod_workshop
  * @copyright  2009 David Mudrak <david.mudrak@gmail.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -63,7 +62,7 @@ class workshop_submission_form extends moodleform {
         $mform->setType('edit', PARAM_INT);
 
         $mform->addElement('hidden', 'example', 0);
-        $mform->setType('hidden', PARAM_INT);
+        $mform->setType('example', PARAM_INT);
 
         $this->add_action_buttons();
 
@@ -87,6 +86,12 @@ class workshop_submission_form extends moodleform {
             if ($DB->count_records_sql($sql, array($data['cmid'], $USER->id))) {
                 $errors['title'] = get_string('err_multiplesubmissions', 'mod_workshop');
             }
+        }
+
+        $getfiles = file_get_drafarea_files($data['attachment_filemanager']);
+        if (empty($getfiles->list) and html_is_blank($data['content_editor']['text'])) {
+            $errors['content_editor'] = get_string('submissionrequiredcontent', 'mod_workshop');
+            $errors['attachment_filemanager'] = get_string('submissionrequiredfile', 'mod_workshop');
         }
 
         return $errors;

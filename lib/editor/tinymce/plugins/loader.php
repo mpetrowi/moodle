@@ -62,7 +62,7 @@ if ($allowcache) {
     // Set it to expire a year later. Note that this means we should never get
     // If-Modified-Since requests so there is no need to handle them specially.
     header('Expires: ' . date('r', time() + 365 * 24 * 3600));
-    header('Cache-Control: max-age=' . 365 * 24 * 3600);
+    header('Cache-Control: max-age=' . 365 * 24 * 3600 . ', immutable');
     // Pragma is set to no-cache by default so must be overridden.
     header('Pragma:');
 }
@@ -83,11 +83,13 @@ if ($mimetype === 'application/x-javascript' && $allowcache) {
 
     // If it doesn't exist, minify it and save to that location.
     if (!file_exists($cachefile)) {
-        $content = js_minify(array($file));
+        $content = core_minify::js_files(array($file));
         js_write_cache_file_content($cachefile, $content);
     }
 
     $file = $cachefile;
+} else if ($mimetype === 'text/html') {
+    header('X-UA-Compatible: IE=edge');
 }
 
 // Serve file.

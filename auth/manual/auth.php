@@ -18,8 +18,7 @@
  * Authentication Plugin: Manual Authentication
  * Just does a simple check against the moodle database.
  *
- * @package    auth
- * @subpackage manual
+ * @package    auth_manual
  * @copyright  1999 onwards Martin Dougiamas (http://dougiamas.com)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -39,11 +38,29 @@ require_once($CFG->libdir.'/authlib.php');
 class auth_plugin_manual extends auth_plugin_base {
 
     /**
+     * The name of the component. Used by the configuration.
+     */
+    const COMPONENT_NAME = 'auth_manual';
+    const LEGACY_COMPONENT_NAME = 'auth/manual';
+
+    /**
      * Constructor.
      */
-    function auth_plugin_manual() {
+    public function __construct() {
         $this->authtype = 'manual';
-        $this->config = get_config('auth/manual');
+        $config = get_config(self::COMPONENT_NAME);
+        $legacyconfig = get_config(self::LEGACY_COMPONENT_NAME);
+        $this->config = (object)array_merge((array)$legacyconfig, (array)$config);
+    }
+
+    /**
+     * Old syntax of class constructor. Deprecated in PHP7.
+     *
+     * @deprecated since Moodle 3.1
+     */
+    public function auth_plugin_manual() {
+        debugging('Use of class name as constructor is deprecated', DEBUG_DEVELOPER);
+        self::__construct();
     }
 
     /**
@@ -82,6 +99,10 @@ class auth_plugin_manual extends auth_plugin_base {
      */
     function user_update_password($user, $newpassword) {
         $user = get_complete_user_data('id', $user->id);
+        set_user_preference('auth_manual_passwordupdatetime', time(), $user->id);
+        // This will also update the stored hash to the latest algorithm
+        // if the existing hash is using an out-of-date algorithm (or the
+        // legacy md5 algorithm).
         return update_internal_user_password($user, $newpassword);
     }
 
@@ -128,28 +149,40 @@ class auth_plugin_manual extends auth_plugin_base {
     }
 
     /**
-     * Prints a form for configuring this authentication plugin.
+     * Returns true if plugin can be manually set.
      *
-     * This function is called from admin/auth.php, and outputs a full page with
-     * a form for configuring this plugin.
-     *
-     * @param array $config An object containing all the data for this page.
-     * @param string $error
-     * @param array $user_fields
-     * @return void
+     * @return bool
      */
-    function config_form($config, $err, $user_fields) {
-        include 'config.html';
+    function can_be_manually_set() {
+        return true;
     }
 
     /**
-     * Processes and stores configuration data for this authentication plugin.
+     * Return number of days to user password expires.
      *
-     * @param array $config
-     * @return void
+     * If user password does not expire, it should return 0 or a positive value.
+     * If user password is already expired, it should return negative value.
+     *
+     * @param mixed $username username (with system magic quotes)
+     * @return integer
      */
-    function process_config($config) {
-        return true;
+    public function password_expire($username) {
+        $result = 0;
+
+        if (!empty($this->config->expirationtime)) {
+            $user = core_user::get_user_by_username($username, 'id,timecreated');
+            $lastpasswordupdatetime = get_user_preferences('auth_manual_passwordupdatetime', $user->timecreated, $user->id);
+            $expiretime = $lastpasswordupdatetime + $this->config->expirationtime * DAYSECS;
+            $now = time();
+            $result = ($expiretime - $now) / DAYSECS;
+            if ($expiretime > $now) {
+                $result = ceil($result);
+            } else {
+                $result = floor($result);
+            }
+        }
+
+        return $result;
     }
 
    /**
@@ -170,9 +203,6 @@ class auth_plugin_manual extends auth_plugin_base {
                 return AUTH_CONFIRM_ALREADY;
             } else {
                 $DB->set_field("user", "confirmed", 1, array("id"=>$user->id));
-                if ($user->firstaccess == 0) {
-                    $DB->set_field("user", "firstaccess", time(), array("id"=>$user->id));
-                }
                 return AUTH_CONFIRM_OK;
             }
         } else  {

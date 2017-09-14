@@ -22,9 +22,9 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL
  * @copyright  (C) 1999 onwards Martin Dougiamas  http://dougiamas.com
  *
- * On this page the administrator selects which hub he wants to register,
- * except for MOOCH. Admins can register with MOOCH with the top admin menu "Registration" link.
- * On this page the administrator can also unregister from any hubs, including MOOCH.
+ * On this page the administrator selects which hub he wants to register (except for moodle.net)
+ * Admins can register with moodle.net via the site admin menu "Registration" link.
+ * On this page the administrator can also unregister from any hubs including moodle.net.
  */
 
 require('../../config.php');
@@ -181,13 +181,8 @@ if (empty($cancel) and $unregistration and !$confirm) {
     echo $OUTPUT->header();
 
     //check if the site is registered on Moodle.org and display a message about registering on MOOCH
-    $registered = $DB->count_records('registration_hubs', array('huburl' => HUB_MOODLEORGHUBURL, 'confirmed' => 1));
-    if (empty($registered)) {
-        $warningmsg = get_string('registermoochtips', 'hub');
-        $warningmsg .= $renderer->single_button(new moodle_url('register.php', array('huburl' => HUB_MOODLEORGHUBURL
-                    , 'hubname' => 'Moodle.org')), get_string('register', 'admin'));
-        echo $renderer->box($warningmsg, 'buttons mdl-align generalbox adminwarning');
-    }
+    $adminrenderer = $PAGE->get_renderer('core', 'admin');
+    echo $adminrenderer->warn_if_not_registered();
 
     //do not check sesskey if confirm = false because this script is linked into email message
     if (!empty($errormessage)) {

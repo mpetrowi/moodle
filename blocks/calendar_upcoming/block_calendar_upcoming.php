@@ -1,25 +1,53 @@
 <?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+/**
+ * Handles displaying the calendar upcoming events block.
+ *
+ * @package    block_calendar_upcoming
+ * @copyright  2004 Eloy Lafuente (stronk7) {@link http://stronk7.com}
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 class block_calendar_upcoming extends block_base {
-    function init() {
+
+    /**
+     * Initialise the block.
+     */
+    public function init() {
         $this->title = get_string('pluginname', 'block_calendar_upcoming');
     }
 
-    function get_content() {
-        global $USER, $CFG, $SESSION;
-        $cal_m = optional_param( 'cal_m', 0, PARAM_INT );
-        $cal_y = optional_param( 'cal_y', 0, PARAM_INT );
+    /**
+     * Return the content of this block.
+     *
+     * @return stdClass the content
+     */
+    public function get_content() {
+        global $CFG;
 
         require_once($CFG->dirroot.'/calendar/lib.php');
 
-        if ($this->content !== NULL) {
+        if ($this->content !== null) {
             return $this->content;
         }
         $this->content = new stdClass;
         $this->content->text = '';
 
         $filtercourse    = array();
-        if (empty($this->instance)) { // Overrides: use no course at all
+        if (empty($this->instance)) { // Overrides: use no course at all.
             $courseshown = false;
             $this->content->footer = '';
 
@@ -60,7 +88,9 @@ class block_calendar_upcoming extends block_base {
         $events = calendar_get_upcoming($courses, $group, $user, $lookahead, $maxevents);
 
         if (!empty($this->instance)) {
-            $this->content->text = calendar_get_block_upcoming($events, 'view.php?view=day&amp;course='.$courseshown.'&amp;');
+            $link = 'view.php?view=day&amp;course='.$courseshown.'&amp;';
+            $showcourselink = ($this->page->course->id == SITEID);
+            $this->content->text = self::get_upcoming_content($events, $link, $showcourselink);
         }
 
         if (empty($this->content->text)) {
@@ -68,6 +98,54 @@ class block_calendar_upcoming extends block_base {
         }
 
         return $this->content;
+    }
+
+    /**
+     * Get the upcoming event block content.
+     *
+     * @param array $events list of events
+     * @param \moodle_url|string $linkhref link to event referer
+     * @param boolean $showcourselink whether links to courses should be shown
+     * @return string|null $content html block content
+     */
+    public static function get_upcoming_content($events, $linkhref = null, $showcourselink = false) {
+        $content = '';
+        $lines = count($events);
+
+        if (!$lines) {
+            return $content;
+        }
+
+        for ($i = 0; $i < $lines; ++$i) {
+            if (!isset($events[$i]->time)) {
+                continue;
+            }
+            $events[$i] = calendar_add_event_metadata($events[$i]);
+            $content .= '<div class="event"><span class="icon c0">' . $events[$i]->icon . '</span>';
+            if (!empty($events[$i]->referer)) {
+                // That's an activity event, so let's provide the hyperlink.
+                $content .= $events[$i]->referer;
+            } else {
+                if (!empty($linkhref)) {
+                    $href = calendar_get_link_href(new \moodle_url(CALENDAR_URL . $linkhref), 0, 0, 0,
+                        $events[$i]->timestart);
+                    $href->set_anchor('event_' . $events[$i]->id);
+                    $content .= \html_writer::link($href, $events[$i]->name);
+                } else {
+                    $content .= $events[$i]->name;
+                }
+            }
+            $events[$i]->time = str_replace('&raquo;', '<br />&raquo;', $events[$i]->time);
+            if ($showcourselink && !empty($events[$i]->courselink)) {
+                $content .= \html_writer::div($events[$i]->courselink, 'course');
+            }
+            $content .= '<div class="date">' . $events[$i]->time . '</div></div>';
+            if ($i < $lines - 1) {
+                $content .= '<hr />';
+            }
+        }
+
+        return $content;
     }
 }
 

@@ -81,11 +81,20 @@ class google_docs {
         if ($search) {
             $url.='?q='.urlencode($search);
         }
-        $content = $this->googleoauth->get($url);
-
-        $xml = new SimpleXMLElement($content);
 
         $files = array();
+        $content = $this->googleoauth->get($url);
+        try {
+            if (strpos($content, '<?xml') !== 0) {
+                throw new moodle_exception('invalidxmlresponse');
+            }
+            $xml = new SimpleXMLElement($content);
+        } catch (Exception $e) {
+            // An error occured while trying to parse the XML, let's just return nothing. SimpleXML does not
+            // return a more specific Exception, that's why the global Exception class is caught here.
+            return $files;
+        }
+        date_default_timezone_set(core_date::get_user_timezone());
         foreach ($xml->entry as $gdoc) {
             $docid  = (string) $gdoc->children('http://schemas.google.com/g/2005')->resourceId;
             list($type, $docid) = explode(':', $docid);
@@ -121,10 +130,11 @@ class google_docs {
             $files[] =  array( 'title' => $title,
                 'url' => "{$gdoc->link[0]->attributes()->href}",
                 'source' => $source,
-                'date'   => usertime(strtotime($gdoc->updated)),
-                'thumbnail' => (string) $OUTPUT->pix_url(file_extension_icon($title, 32))
+                'date'   => strtotime($gdoc->updated),
+                'thumbnail' => (string) $OUTPUT->image_url(file_extension_icon($title, 32))
             );
         }
+        core_date::set_default_server_timezone();
 
         return $files;
     }
@@ -317,10 +327,19 @@ class google_picasa {
      * @return mixes $files Array in the format get_listing uses for folders
      */
     public function get_albums() {
-        $content = $this->googleoauth->get(self::LIST_ALBUMS_URL);
-        $xml = new SimpleXMLElement($content);
-
         $files = array();
+        $content = $this->googleoauth->get(self::LIST_ALBUMS_URL);
+
+        try {
+            if (strpos($content, '<?xml') !== 0) {
+                throw new moodle_exception('invalidxmlresponse');
+            }
+            $xml = new SimpleXMLElement($content);
+        } catch (Exception $e) {
+            // An error occured while trying to parse the XML, let's just return nothing. SimpleXML does not
+            // return a more specific Exception, that's why the global Exception class is caught here.
+            return $files;
+        }
 
         foreach ($xml->entry as $album) {
             $gphoto = $album->children('http://schemas.google.com/photos/2007');
@@ -338,7 +357,6 @@ class google_picasa {
                 'thumbnail_height' => 160,
                 'children' => array(),
             );
-
         }
 
         return $files;
@@ -352,11 +370,19 @@ class google_picasa {
      * @return mixed $files A list of files for the file picker
      */
     public function get_photo_details($rawxml) {
-
-        $xml = new SimpleXMLElement($rawxml);
-        $this->lastalbumname = (string)$xml->title;
-
         $files = array();
+
+        try {
+            if (strpos($rawxml, '<?xml') !== 0) {
+                throw new moodle_exception('invalidxmlresponse');
+            }
+            $xml = new SimpleXMLElement($rawxml);
+        } catch (Exception $e) {
+            // An error occured while trying to parse the XML, let's just return nothing. SimpleXML does not
+            // return a more specific Exception, that's why the global Exception class is caught here.
+            return $files;
+        }
+        $this->lastalbumname = (string)$xml->title;
 
         foreach ($xml->entry as $photo) {
             $gphoto = $photo->children('http://schemas.google.com/photos/2007');

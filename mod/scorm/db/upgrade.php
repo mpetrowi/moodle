@@ -17,12 +17,12 @@
 /**
  * Upgrade script for the scorm module.
  *
- * @package    mod
- * @subpackage scorm
- * @copyright 1999 onwards Martin Dougiamas  {@link http://moodle.com}
+ * @package    mod_scorm
+ * @copyright  1999 onwards Martin Dougiamas  {@link http://moodle.com}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+defined('MOODLE_INTERNAL') || die();
 
 /**
  * @global moodle_database $DB
@@ -34,49 +34,38 @@ function xmldb_scorm_upgrade($oldversion) {
 
     $dbman = $DB->get_manager();
 
-
-    // Moodle v2.2.0 release upgrade line
-    // Put any upgrade step following this
-
-    if ($oldversion < 2012032100) {
-        unset_config('updatetime', 'scorm');
-        upgrade_mod_savepoint(true, 2012032100, 'scorm');
-    }
-
-    // Adding completion fields to scorm table
-    if ($oldversion < 2012032101) {
+    // MDL-50620 Add mastery override option.
+    if ($oldversion < 2016021000) {
         $table = new xmldb_table('scorm');
 
-        $field = new xmldb_field('completionstatusrequired', XMLDB_TYPE_INTEGER, '1', XMLDB_UNSIGNED, null, null, null, 'timemodified');
+        $field = new xmldb_field('masteryoverride', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '1', 'lastattemptlock');
         if (!$dbman->field_exists($table, $field)) {
             $dbman->add_field($table, $field);
         }
 
-        $field = new xmldb_field('completionscorerequired', XMLDB_TYPE_INTEGER, '2', XMLDB_UNSIGNED, null, null, null, 'completionstatusrequired');
+        upgrade_mod_savepoint(true, 2016021000, 'scorm');
+    }
+
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
+
+    // MDL-44712 improve multi-sco activity completion.
+    if ($oldversion < 2016080900) {
+        $table = new xmldb_table('scorm');
+
+        $field = new xmldb_field('completionstatusallscos', XMLDB_TYPE_INTEGER, '1', null, null, null, null, 'completionscorerequired');
         if (!$dbman->field_exists($table, $field)) {
             $dbman->add_field($table, $field);
         }
 
-        upgrade_mod_savepoint(true, 2012032101, 'scorm');
+        upgrade_mod_savepoint(true, 2016080900, 'scorm');
     }
 
-    // Moodle v2.3.0 release upgrade line
-    // Put any upgrade step following this
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
 
-    //rename config var from maxattempts to maxattempt
-    if ($oldversion < 2012061701) {
-        $maxattempts = get_config('scorm', 'maxattempts');
-        $maxattempts_adv = get_config('scorm', 'maxattempts_adv');
-        set_config('maxattempt', $maxattempts, 'scorm');
-        set_config('maxattempt_adv', $maxattempts_adv, 'scorm');
-
-        unset_config('maxattempts', 'scorm'); //remove old setting.
-        unset_config('maxattempts_adv', 'scorm'); //remove old setting.
-        upgrade_mod_savepoint(true, 2012061701, 'scorm');
-    }
-
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }
-
-

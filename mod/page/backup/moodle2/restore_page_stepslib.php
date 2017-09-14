@@ -16,8 +16,8 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @package moodlecore
- * @subpackage backup-moodle2
+ * @package   mod_page
+ * @category  backup
  * @copyright 2010 onwards Eloy Lafuente (stronk7) {@link http://stronk7.com}
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -46,6 +46,9 @@ class restore_page_activity_structure_step extends restore_activity_structure_st
         $data = (object)$data;
         $oldid = $data->id;
         $data->course = $this->get_courseid();
+
+        // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+        // See MDL-9367.
 
         // insert the page record
         $newitemid = $DB->insert_record('page', $data);

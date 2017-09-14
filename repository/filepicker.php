@@ -19,7 +19,7 @@
 /**
  * This file is used to browse repositories in non-javascript mode
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    core
  * @subpackage repository
  * @copyright  2009 Dongsheng Cai <dongsheng@moodle.com>
@@ -30,7 +30,7 @@ require_once('../config.php');
 require_once($CFG->libdir.'/filelib.php');
 require_once('lib.php');
 /// Wait as long as it takes for this script to finish
-set_time_limit(0);
+core_php_time_limit::raise();
 
 require_sesskey();
 require_login();
@@ -59,6 +59,7 @@ $search_text = optional_param('s', '',             PARAM_CLEANHTML);
 $maxfiles    = optional_param('maxfiles', -1,      PARAM_INT);    // maxfiles
 $maxbytes    = optional_param('maxbytes',  0,      PARAM_INT);    // maxbytes
 $subdirs     = optional_param('subdirs',  0,       PARAM_INT);    // maxbytes
+$areamaxbytes   = optional_param('areamaxbytes', FILE_AREA_MAX_BYTES_UNLIMITED, PARAM_INT);    // Area maxbytes.
 $accepted_types = optional_param_array('accepted_types', '*', PARAM_RAW);
 
 // the path to save files
@@ -93,7 +94,7 @@ $context = context::instance_by_id($contextid);
 // Make sure maxbytes passed is within site filesize limits.
 $maxbytes = get_user_max_upload_file_size($context, $CFG->maxbytes, $course->maxbytes, $maxbytes);
 
-$params = array('ctx_id' => $contextid, 'itemid' => $itemid, 'env' => $env, 'course'=>$courseid, 'maxbytes'=>$maxbytes, 'maxfiles'=>$maxfiles, 'subdirs'=>$subdirs, 'sesskey'=>sesskey());
+$params = array('ctx_id' => $contextid, 'itemid' => $itemid, 'env' => $env, 'course'=>$courseid, 'maxbytes'=>$maxbytes, 'areamaxbytes'=>$areamaxbytes, 'maxfiles'=>$maxfiles, 'subdirs'=>$subdirs, 'sesskey'=>sesskey());
 $params['action'] = 'browse';
 $params['draftpath'] = $draftpath;
 $home_url = new moodle_url('/repository/draftfiles_manager.php', $params);
@@ -141,12 +142,12 @@ case 'search':
             if (isset($item['thumbnail_width'])) {
                 $style .= 'max-width:'.$item['thumbnail_width'].'px;';
             }
-            echo html_writer::empty_tag('img', array('src' => $item['thumbnail'], 'style' => $style));
+            echo html_writer::empty_tag('img', array('src' => $item['thumbnail'], 'alt' => '', 'style' => $style));
             echo '</td><td>';
             if (!empty($item['url'])) {
-                echo html_writer::link($item['url'], $item['title'], array('target'=>'_blank'));
+                echo html_writer::link($item['url'], s($item['title']), array('target'=>'_blank'));
             } else {
-                echo $item['title'];
+                echo s($item['title']);
             }
             echo '</td>';
             echo '<td>';
@@ -203,7 +204,7 @@ case 'sign':
                         'draftpath'=>$draftpath,
                         'savepath'=>$savepath
                         ));
-                    echo '<strong>' . html_writer::link($pathurl, $p['name']) . '</strong>';
+                    echo '<strong>' . html_writer::link($pathurl, s($p['name'])) . '</strong>';
                     echo '<span> / </span>';
                 }
             }
@@ -240,9 +241,9 @@ case 'sign':
                 echo html_writer::empty_tag('img', array('src' => $item['thumbnail'], 'style' => $style));
                 echo '</td><td>';
                 if (!empty($item['url'])) {
-                    echo html_writer::link($item['url'], $item['title'], array('target'=>'_blank'));
+                    echo html_writer::link($item['url'], s($item['title']), array('target'=>'_blank'));
                 } else {
-                    echo $item['title'];
+                    echo s($item['title']);
                 }
                 echo '</td>';
                 echo '<td>';
@@ -292,7 +293,7 @@ case 'download':
     // note that in this case user may not have permission to access the source file directly
     // so no file_browser/file_info can be used below
     if ($repo->has_moodle_files()) {
-        $file = repository::get_moodle_file($fileurl);
+        $file = repository::get_moodle_file($reference);
         if ($file && $file->is_external_file()) {
             $sourcefield = $file->get_source(); // remember the original source
             $record->source = $repo::build_source_field($sourcefield);
@@ -318,7 +319,7 @@ case 'download':
     $record->sortorder = 0;
 
     if ($repo->has_moodle_files()) {
-        $fileinfo = $repo->copy_to_area($reference, $record, $maxbytes);
+        $fileinfo = $repo->copy_to_area($reference, $record, $maxbytes, $areamaxbytes);
         redirect($home_url, get_string('downloadsucc', 'repository'));
     } else {
         $thefile = $repo->get_file($reference, $filename);
@@ -327,6 +328,11 @@ case 'download':
             if ($maxbytes != -1 && $filesize>$maxbytes) {
                 unlink($thefile['path']);
                 print_error('maxbytes');
+            }
+            // Ensure the file will not make the area exceed its size limit.
+            if (file_is_draft_area_limit_reached($record->itemid, $areamaxbytes, $filesize)) {
+                unlink($thefile['path']);
+                print_error('maxareabytes');
             }
             try {
                 $info = repository::move_to_filepool($thefile['path'], $record);
@@ -351,8 +357,8 @@ case 'confirm':
     echo '<form method="post">';
     echo '<table>';
     echo '  <tr>';
-    echo '    <td><label>'.get_string('filename', 'repository').'</label></td>';
-    echo '    <td><input type="text" name="filename" value="'.s($filename).'" /></td>';
+    echo '    <td>'. html_writer::label(get_string('filename', 'repository'), 'filename'). '</td>';
+    echo '    <td><input type="text" id="filename" name="filename" value="'.s($filename).'" /></td>';
     echo '    <td><input type="hidden" name="fileurl" value="'.s($fileurl).'" /></td>';
     echo '    <td><input type="hidden" name="action" value="download" /></td>';
     echo '    <td><input type="hidden" name="itemid" value="'.s($itemid).'" /></td>';
@@ -371,7 +377,7 @@ case 'confirm':
 default:
 case 'plugins':
     $params = array();
-    $params['context'] = array($user_context, get_system_context());
+    $params['context'] = array($user_context, context_system::instance());
     $params['currentcontext'] = $PAGE->context;
     $params['return_types'] = FILE_INTERNAL;
 
@@ -387,8 +393,8 @@ case 'plugins':
         $aurl->params(array('savepath'=>$savepath, 'action' => 'list', 'repo_id' => $info->id, 'draftpath'=>$draftpath));
 
         echo '<li>';
-        echo '<img src="'.$info->icon.'" alt="'.$info->name.'" width="16" height="16" /> ';
-        echo html_writer::link($aurl, $info->name);
+        echo html_writer::empty_tag('img', array('src'=>$info->icon, 'alt'=>$info->name, 'class'=>'icon icon-pre'));
+        echo html_writer::link($aurl, s($info->name));
         echo '</li>';
     }
     echo '</ul>';

@@ -25,6 +25,9 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once($CFG->dirroot . '/lib/filestorage/file_progress.php');
+require_once($CFG->dirroot . '/lib/filestorage/file_system.php');
+
 /**
  * Class representing local files stored in a sha1 file pool.
  *
@@ -42,23 +45,33 @@ class stored_file {
     private $fs;
     /** @var stdClass record from the files table left join files_reference table */
     private $file_record;
-    /** @var string location of content files */
-    private $filedir;
     /** @var repository repository plugin instance */
     private $repository;
+    /** @var file_system filesystem instance */
+    private $filesystem;
+
+    /**
+     * @var int Indicates a file handle of the type returned by fopen.
+     */
+    const FILE_HANDLE_FOPEN = 0;
+
+    /**
+     * @var int Indicates a file handle of the type returned by gzopen.
+     */
+    const FILE_HANDLE_GZOPEN = 1;
+
 
     /**
      * Constructor, this constructor should be called ONLY from the file_storage class!
      *
      * @param file_storage $fs file  storage instance
      * @param stdClass $file_record description of file
-     * @param string $filedir location of file directory with sh1 named content files
+     * @param string $deprecated
      */
-    public function __construct(file_storage $fs, stdClass $file_record, $filedir) {
+    public function __construct(file_storage $fs, stdClass $file_record, $deprecated = null) {
         global $DB, $CFG;
         $this->fs          = $fs;
         $this->file_record = clone($file_record); // prevent modifications
-        $this->filedir     = $filedir; // keep secret, do not expose!
 
         if (!empty($file_record->repositoryid)) {
             require_once("$CFG->dirroot/repository/lib.php");
@@ -71,11 +84,31 @@ class stored_file {
             $this->repository = null;
         }
         // make sure all reference fields exist in file_record even when it is not a reference
-        foreach (array('referencelastsync', 'referencelifetime', 'referencefileid', 'reference', 'repositoryid') as $key) {
+        foreach (array('referencelastsync', 'referencefileid', 'reference', 'repositoryid') as $key) {
             if (empty($this->file_record->$key)) {
                 $this->file_record->$key = null;
             }
         }
+
+        $this->filesystem = $fs->get_file_system();
+    }
+
+    /**
+     * Magic method, called during serialization.
+     *
+     * @return array
+     */
+    public function __sleep() {
+        // We only ever want the file_record saved, not the file_storage object.
+        return ['file_record'];
+    }
+
+    /**
+     * Magic method, called during unserialization.
+     */
+    public function __wakeup() {
+        // Recreate our stored_file based on the file_record, and using file storage retrieved the correct way.
+        $this->__construct(get_file_storage(), $this->file_record);
     }
 
     /**
@@ -88,6 +121,15 @@ class stored_file {
     }
 
     /**
+     * Whether or not this is a controlled link. Note that repositories cannot support FILE_REFERENCE and FILE_CONTROLLED_LINK.
+     *
+     * @return bool
+     */
+    public function is_controlled_link() {
+        return $this->is_external_file() && $this->repository->supported_returntypes() & FILE_CONTROLLED_LINK;
+    }
+
+    /**
      * Update some file record fields
      * NOTE: Must remain protected
      *
@@ -95,7 +137,9 @@ class stored_file {
      */
     protected function update($dataobject) {
         global $DB;
+        $updatereferencesneeded = false;
         $keys = array_keys((array)$this->file_record);
+        $filepreupdate = clone($this->file_record);
         foreach ($dataobject as $field => $value) {
             if (in_array($field, $keys)) {
                 if ($field == 'contextid' and (!is_number($value) or $value < 1)) {
@@ -154,10 +198,8 @@ class stored_file {
                     }
                 }
 
-                if ($field === 'referencelastsync' or $field === 'referencelifetime') {
-                    // do not update those fields
-                    // TODO MDL-33416 [2.4] fields referencelastsync and referencelifetime to be removed from {files} table completely
-                    continue;
+                if (($field == 'contenthash' || $field == 'filesize') && $this->file_record->$field != $value) {
+                    $updatereferencesneeded = true;
                 }
 
                 // adding the field
@@ -167,18 +209,25 @@ class stored_file {
             }
         }
         // Validate mimetype field
-        // we don't use {@link stored_file::get_content_file_location()} here becaues it will try to update file_record
-        $pathname = $this->get_pathname_by_contenthash();
-        // try to recover the content from trash
-        if (!is_readable($pathname)) {
-            if (!$this->fs->try_content_recovery($this) or !is_readable($pathname)) {
-                throw new file_exception('storedfilecannotread', '', $pathname);
-            }
-        }
-        $mimetype = $this->fs->mimetype($pathname, $this->file_record->filename);
+        $mimetype = $this->filesystem->mimetype_from_storedfile($this);
         $this->file_record->mimetype = $mimetype;
 
         $DB->update_record('files', $this->file_record);
+        if ($updatereferencesneeded) {
+            // Either filesize or contenthash of this file have changed. Update all files that reference to it.
+            $this->fs->update_references_to_storedfile($this);
+        }
+
+        // Callback for file update.
+        if (!$this->is_directory()) {
+            if ($pluginsfunction = get_plugins_with_function('after_file_updated')) {
+                foreach ($pluginsfunction as $plugintype => $plugins) {
+                    foreach ($plugins as $pluginfunction) {
+                        $pluginfunction($this->file_record, $filepreupdate);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -189,7 +238,14 @@ class stored_file {
      */
     public function rename($filepath, $filename) {
         if ($this->fs->file_exists($this->get_contextid(), $this->get_component(), $this->get_filearea(), $this->get_itemid(), $filepath, $filename)) {
-            throw new file_exception('storedfilenotcreated', '', 'file exists, cannot rename');
+            $a = new stdClass();
+            $a->contextid = $this->get_contextid();
+            $a->component = $this->get_component();
+            $a->filearea  = $this->get_filearea();
+            $a->itemid    = $this->get_itemid();
+            $a->filepath  = $filepath;
+            $a->filename  = $filename;
+            throw new file_exception('storedfilenotcreated', $a, 'file exists, cannot rename');
         }
         $filerecord = new stdClass;
         $filerecord->filepath = $filepath;
@@ -200,14 +256,48 @@ class stored_file {
     }
 
     /**
-     * Replace the content by providing another stored_file instance
+     * Function stored_file::replace_content_with() is deprecated. Please use stored_file::replace_file_with()
      *
-     * @param stored_file $storedfile
+     * @deprecated since Moodle 2.6 MDL-42016 - please do not use this function any more.
+     * @see stored_file::replace_file_with()
      */
     public function replace_content_with(stored_file $storedfile) {
-        $contenthash = $storedfile->get_contenthash();
-        $this->set_contenthash($contenthash);
-        $this->set_filesize($storedfile->get_filesize());
+        throw new coding_exception('Function stored_file::replace_content_with() can not be used any more . ' .
+            'Please use stored_file::replace_file_with()');
+    }
+
+    /**
+     * Replaces the fields that might have changed when file was overriden in filepicker:
+     * reference, contenthash, filesize, userid
+     *
+     * Note that field 'source' must be updated separately because
+     * it has different format for draft and non-draft areas and
+     * this function will usually be used to replace non-draft area
+     * file with draft area file.
+     *
+     * @param stored_file $newfile
+     * @throws coding_exception
+     */
+    public function replace_file_with(stored_file $newfile) {
+        if ($newfile->get_referencefileid() &&
+                $this->fs->get_references_count_by_storedfile($this)) {
+            // The new file is a reference.
+            // The current file has other local files referencing to it.
+            // Double reference is not allowed.
+            throw new moodle_exception('errordoublereference', 'repository');
+        }
+
+        $filerecord = new stdClass;
+        if ($this->filesystem->is_file_readable_remotely_by_storedfile($newfile)) {
+            $contenthash = $newfile->get_contenthash();
+            $filerecord->contenthash = $contenthash;
+        } else {
+            throw new file_exception('storedfileproblem', 'Invalid contenthash, content must be already in filepool', $contenthash);
+        }
+        $filerecord->filesize = $newfile->get_filesize();
+        $filerecord->referencefileid = $newfile->get_referencefileid();
+        $filerecord->userid = $newfile->get_userid();
+        $this->update($filerecord);
     }
 
     /**
@@ -248,7 +338,6 @@ class stored_file {
         $this->file_record->reference = null;
         $this->file_record->referencefileid = null;
         $this->file_record->referencelastsync = null;
-        $this->file_record->referencelifetime = null;
     }
 
     /**
@@ -275,58 +364,45 @@ class stored_file {
     public function delete() {
         global $DB;
 
-        $transaction = $DB->start_delegated_transaction();
+        if ($this->is_directory()) {
+            // Directories can not be referenced, just delete the record.
+            $DB->delete_records('files', array('id'=>$this->file_record->id));
 
-        // If there are other files referring to this file, convert them to copies.
-        if ($files = $this->fs->get_references_by_storedfile($this)) {
-            foreach ($files as $file) {
-                $this->fs->import_external_file($file);
+        } else {
+            $transaction = $DB->start_delegated_transaction();
+
+            // If there are other files referring to this file, convert them to copies.
+            if ($files = $this->fs->get_references_by_storedfile($this)) {
+                foreach ($files as $file) {
+                    $this->fs->import_external_file($file);
+                }
+            }
+
+            // If this file is a reference (alias) to another file, unlink it first.
+            if ($this->is_external_file()) {
+                $this->delete_reference();
+            }
+
+            // Now delete the file record.
+            $DB->delete_records('files', array('id'=>$this->file_record->id));
+
+            $transaction->allow_commit();
+
+            if (!$this->is_directory()) {
+                // Callback for file deletion.
+                if ($pluginsfunction = get_plugins_with_function('after_file_deleted')) {
+                    foreach ($pluginsfunction as $plugintype => $plugins) {
+                        foreach ($plugins as $pluginfunction) {
+                            $pluginfunction($this->file_record);
+                        }
+                    }
+                }
             }
         }
 
-        // If this file is a reference (alias) to another file, unlink it first.
-        if ($this->is_external_file()) {
-            $this->delete_reference();
-        }
-
-        // Now delete the file record.
-        $DB->delete_records('files', array('id'=>$this->file_record->id));
-
-        $transaction->allow_commit();
-
-        // moves pool file to trash if content not needed any more
-        $this->fs->deleted_file_cleanup($this->file_record->contenthash);
+        // Move pool file to trash if content not needed any more.
+        $this->filesystem->remove_file($this->file_record->contenthash);
         return true; // BC only
-    }
-
-    /**
-     * Get file pathname by contenthash
-     *
-     * NOTE, this function is not calling sync_external_file, it assume the contenthash is current
-     * Protected - developers must not gain direct access to this function.
-     *
-     * @return string full path to pool file with file content
-     */
-    protected function get_pathname_by_contenthash() {
-        // Detect is local file or not.
-        $contenthash = $this->file_record->contenthash;
-        $l1 = $contenthash[0].$contenthash[1];
-        $l2 = $contenthash[2].$contenthash[3];
-        return "$this->filedir/$l1/$l2/$contenthash";
-    }
-
-    /**
-     * Get file pathname by given contenthash, this method will try to sync files
-     *
-     * Protected - developers must not gain direct access to this function.
-     *
-     * NOTE: do not make this public, we must not modify or delete the pool files directly! ;-)
-     *
-     * @return string full path to pool file with file content
-     **/
-    protected function get_content_file_location() {
-        $this->sync_external_file();
-        return $this->get_pathname_by_contenthash();
     }
 
     /**
@@ -337,7 +413,7 @@ class stored_file {
     * @return void
     */
     public function add_to_curl_request(&$curlrequest, $key) {
-        $curlrequest->_tmp_file_post_params[$key] = '@' . $this->get_content_file_location();
+        return $this->filesystem->add_to_curl_request($this, $curlrequest, $key);
     }
 
     /**
@@ -345,29 +421,18 @@ class stored_file {
      *
      * When you want to modify a file, create a new file and delete the old one.
      *
+     * @param int $type Type of file handle (FILE_HANDLE_xx constant)
      * @return resource file handle
      */
-    public function get_content_file_handle() {
-        $path = $this->get_content_file_location();
-        if (!is_readable($path)) {
-            if (!$this->fs->try_content_recovery($this) or !is_readable($path)) {
-                throw new file_exception('storedfilecannotread', '', $path);
-            }
-        }
-        return fopen($path, 'rb'); // Binary reading only!!
+    public function get_content_file_handle($type = self::FILE_HANDLE_FOPEN) {
+        return $this->filesystem->get_content_file_handle($this, $type);
     }
 
     /**
      * Dumps file content to page.
      */
     public function readfile() {
-        $path = $this->get_content_file_location();
-        if (!is_readable($path)) {
-            if (!$this->fs->try_content_recovery($this) or !is_readable($path)) {
-                throw new file_exception('storedfilecannotread', '', $path);
-            }
-        }
-        readfile($path);
+        return $this->filesystem->readfile($this);
     }
 
     /**
@@ -376,13 +441,7 @@ class stored_file {
      * @return string content
      */
     public function get_content() {
-        $path = $this->get_content_file_location();
-        if (!is_readable($path)) {
-            if (!$this->fs->try_content_recovery($this) or !is_readable($path)) {
-                throw new file_exception('storedfilecannotread', '', $path);
-            }
-        }
-        return file_get_contents($this->get_content_file_location());
+        return $this->filesystem->get_content($this);
     }
 
     /**
@@ -392,13 +451,7 @@ class stored_file {
      * @return bool success
      */
     public function copy_content_to($pathname) {
-        $path = $this->get_content_file_location();
-        if (!is_readable($path)) {
-            if (!$this->fs->try_content_recovery($this) or !is_readable($path)) {
-                throw new file_exception('storedfilecannotread', '', $path);
-            }
-        }
-        return copy($path, $pathname);
+        return $this->filesystem->copy_content_from_storedfile($this, $pathname);
     }
 
     /**
@@ -431,8 +484,7 @@ class stored_file {
      * @return array of file infos
      */
     public function list_files(file_packer $packer) {
-        $archivefile = $this->get_content_file_location();
-        return $packer->list_files($archivefile);
+        return $this->filesystem->list_files($this, $packer);
     }
 
     /**
@@ -440,11 +492,12 @@ class stored_file {
      *
      * @param file_packer $packer file packer instance
      * @param string $pathname target directory
+     * @param file_progress $progress Progress indicator callback or null if not required
      * @return array|bool list of processed files; false if error
      */
-    public function extract_to_pathname(file_packer $packer, $pathname) {
-        $archivefile = $this->get_content_file_location();
-        return $packer->extract_to_pathname($archivefile, $pathname);
+    public function extract_to_pathname(file_packer $packer, $pathname,
+            file_progress $progress = null) {
+        return $this->filesystem->extract_to_pathname($this, $packer, $pathname, $progress);
     }
 
     /**
@@ -457,11 +510,14 @@ class stored_file {
      * @param int $itemid item ID
      * @param string $pathbase path base
      * @param int $userid user ID
+     * @param file_progress $progress Progress indicator callback or null if not required
      * @return array|bool list of processed files; false if error
      */
-    public function extract_to_storage(file_packer $packer, $contextid, $component, $filearea, $itemid, $pathbase, $userid = NULL) {
-        $archivefile = $this->get_content_file_location();
-        return $packer->extract_to_storage($archivefile, $contextid, $component, $filearea, $itemid, $pathbase);
+    public function extract_to_storage(file_packer $packer, $contextid,
+            $component, $filearea, $itemid, $pathbase, $userid = null, file_progress $progress = null) {
+
+        return $this->filesystem->extract_to_storage($this, $packer, $contextid, $component, $filearea,
+                $itemid, $pathbase, $userid, $progress);
     }
 
     /**
@@ -472,15 +528,7 @@ class stored_file {
      * @return bool success
      */
     public function archive_file(file_archive $filearch, $archivepath) {
-        if ($this->is_directory()) {
-            return $filearch->add_directory($archivepath);
-        } else {
-            $path = $this->get_content_file_location();
-            if (!is_readable($path)) {
-                return false;
-            }
-            return $filearch->add_file_from_pathname($archivepath, $path);
-        }
+        return $this->filesystem->add_storedfile_to_archive($this, $filearch, $archivepath);
     }
 
     /**
@@ -490,22 +538,7 @@ class stored_file {
      * @return mixed array with width, height and mimetype; false if not an image
      */
     public function get_imageinfo() {
-        $path = $this->get_content_file_location();
-        if (!is_readable($path)) {
-            if (!$this->fs->try_content_recovery($this) or !is_readable($path)) {
-                throw new file_exception('storedfilecannotread', '', $path);
-            }
-        }
-        $mimetype = $this->get_mimetype();
-        if (!preg_match('|^image/|', $mimetype) || !filesize($path) || !($imageinfo = getimagesize($path))) {
-            return false;
-        }
-        $image = array('width'=>$imageinfo[0], 'height'=>$imageinfo[1], 'mimetype'=>image_type_to_mime_type($imageinfo[2]));
-        if (empty($image['width']) or empty($image['height']) or empty($image['mimetype'])) {
-            // gd can not parse it, sorry
-            return false;
-        }
-        return $image;
+        return $this->filesystem->get_imageinfo($this);
     }
 
     /**
@@ -556,15 +589,31 @@ class stored_file {
     }
 
     /**
+     * Set synchronised content from file.
+     *
+     * @param string $path Path to the file.
+     */
+    public function set_synchronised_content_from_file($path) {
+        $this->fs->synchronise_stored_file_from_file($this, $path, $this->file_record);
+    }
+
+    /**
+     * Set synchronised content from content.
+     *
+     * @param string $content File content.
+     */
+    public function set_synchronised_content_from_string($content) {
+        $this->fs->synchronise_stored_file_from_string($this, $content, $this->file_record);
+    }
+
+    /**
      * Synchronize file if it is a reference and needs synchronizing
      *
      * Updates contenthash and filesize
      */
     public function sync_external_file() {
-        global $CFG;
-        if (!empty($this->file_record->referencefileid)) {
-            require_once($CFG->dirroot.'/repository/lib.php');
-            repository::sync_external_file($this);
+        if (!empty($this->repository)) {
+            $this->repository->sync_reference($this);
         }
     }
 
@@ -643,15 +692,15 @@ class stored_file {
         return $this->file_record->filesize;
     }
 
-    /**
-     * Returns the size of file in bytes.
+     /**
+     * Function stored_file::set_filesize() is deprecated. Please use stored_file::replace_file_with
      *
-     * @param int $filesize bytes
+     * @deprecated since Moodle 2.6 MDL-42016 - please do not use this function any more.
+     * @see stored_file::replace_file_with()
      */
     public function set_filesize($filesize) {
-        $filerecord = new stdClass;
-        $filerecord->filesize = $filesize;
-        $this->update($filerecord);
+        throw new coding_exception('Function stored_file::set_filesize() can not be used any more. ' .
+            'Please use stored_file::replace_file_with()');
     }
 
     /**
@@ -719,22 +768,6 @@ class stored_file {
     public function get_contenthash() {
         $this->sync_external_file();
         return $this->file_record->contenthash;
-    }
-
-    /**
-     * Set contenthash
-     *
-     * @param string $contenthash
-     */
-    protected function set_contenthash($contenthash) {
-        // make sure the content exists in moodle file pool
-        if ($this->fs->content_exists($contenthash)) {
-            $filerecord = new stdClass;
-            $filerecord->contenthash = $contenthash;
-            $this->update($filerecord);
-        } else {
-            throw new file_exception('storedfileproblem', 'Invalid contenthash, content must be already in filepool', $contenthash);
-        }
     }
 
     /**
@@ -823,9 +856,20 @@ class stored_file {
      * @return int
      */
     public function set_sortorder($sortorder) {
+        $oldorder = $this->file_record->sortorder;
         $filerecord = new stdClass;
         $filerecord->sortorder = $sortorder;
         $this->update($filerecord);
+        if (!$this->is_directory()) {
+            // Callback for file sort order change.
+            if ($pluginsfunction = get_plugins_with_function('after_file_sorted')) {
+                foreach ($pluginsfunction as $plugintype => $plugins) {
+                    foreach ($plugins as $pluginfunction) {
+                        $pluginfunction($this->file_record, $oldorder, $sortorder);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -840,6 +884,22 @@ class stored_file {
             return null;
         }
     }
+
+    /**
+     * Returns repository type.
+     *
+     * @return mixed str|null the repository type or null if is not an external file
+     * @since  Moodle 3.3
+     */
+    public function get_repository_type() {
+
+        if (!empty($this->repository)) {
+            return $this->repository->get_typename();
+        } else {
+            return null;
+        }
+    }
+
 
     /**
      * get reference file id
@@ -858,11 +918,16 @@ class stored_file {
     }
 
     /**
-     * Get reference last sync time
-     * @return int
+     * Function stored_file::get_referencelifetime() is deprecated as reference
+     * life time is no longer stored in DB or returned by repository. Each
+     * repository should decide by itself when to synchronise the references.
+     *
+     * @deprecated since Moodle 2.6 MDL-42016 - please do not use this function any more.
+     * @see repository::sync_reference()
      */
     public function get_referencelifetime() {
-        return $this->file_record->referencelifetime;
+        throw new coding_exception('Function stored_file::get_referencelifetime() can not be used any more. ' .
+            'See repository::sync_reference().');
     }
     /**
      * Returns file reference
@@ -888,43 +953,42 @@ class stored_file {
      * We update contenthash, filesize and status in files table if changed
      * and we always update lastsync in files_reference table
      *
-     * @param string $contenthash
-     * @param int $filesize
-     * @param int $status
-     * @param int $lifetime the life time of this synchronisation results
+     * @param null|string $contenthash if set to null contenthash is not changed
+     * @param int $filesize new size of the file
+     * @param int $status new status of the file (0 means OK, 666 - source missing)
+     * @param int $timemodified last time modified of the source, if known
      */
-    public function set_synchronized($contenthash, $filesize, $status = 0, $lifetime = null) {
-        global $DB;
+    public function set_synchronized($contenthash, $filesize, $status = 0, $timemodified = null) {
         if (!$this->is_external_file()) {
             return;
         }
         $now = time();
+        if ($contenthash === null) {
+            $contenthash = $this->file_record->contenthash;
+        }
         if ($contenthash != $this->file_record->contenthash) {
             $oldcontenthash = $this->file_record->contenthash;
         }
-        if ($lifetime === null) {
-            $lifetime = $this->file_record->referencelifetime;
-        }
         // this will update all entries in {files} that have the same filereference id
-        $this->fs->update_references($this->file_record->referencefileid, $now, $lifetime, $contenthash, $filesize, $status);
+        $this->fs->update_references($this->file_record->referencefileid, $now, null, $contenthash, $filesize, $status, $timemodified);
         // we don't need to call update() for this object, just set the values of changed fields
         $this->file_record->contenthash = $contenthash;
         $this->file_record->filesize = $filesize;
         $this->file_record->status = $status;
         $this->file_record->referencelastsync = $now;
-        $this->file_record->referencelifetime = $lifetime;
+        if ($timemodified) {
+            $this->file_record->timemodified = $timemodified;
+        }
         if (isset($oldcontenthash)) {
-            $this->fs->deleted_file_cleanup($oldcontenthash);
+            $this->filesystem->remove_file($oldcontenthash);
         }
     }
 
     /**
      * Sets the error status for a file that could not be synchronised
-     *
-     * @param int $lifetime the life time of this synchronisation results
      */
-    public function set_missingsource($lifetime = null) {
-        $this->set_synchronized($this->get_contenthash(), $this->get_filesize(), 666, $lifetime);
+    public function set_missingsource() {
+        $this->set_synchronized($this->file_record->contenthash, $this->file_record->filesize, 666);
     }
 
     /**
@@ -949,5 +1013,97 @@ class stored_file {
         if ($this->repository) {
             $this->repository->import_external_file_contents($this, $maxbytes);
         }
+    }
+
+    /**
+     * Gets a file relative to this file in the repository and sends it to the browser.
+     * Checks the function repository::supports_relative_file() to make sure it can be used.
+     *
+     * @param string $relativepath the relative path to the file we are trying to access
+     */
+    public function send_relative_file($relativepath) {
+        if ($this->repository && $this->repository->supports_relative_file()) {
+            $relativepath = clean_param($relativepath, PARAM_PATH);
+            $this->repository->send_relative_file($this, $relativepath);
+        } else {
+            send_file_not_found();
+        }
+    }
+
+    /**
+     * Generates a thumbnail for this stored_file.
+     *
+     * If the GD library has at least version 2 and PNG support is available, the returned data
+     * is the content of a transparent PNG file containing the thumbnail. Otherwise, the function
+     * returns contents of a JPEG file with black background containing the thumbnail.
+     *
+     * @param   int $width the width of the requested thumbnail
+     * @param   int $height the height of the requested thumbnail
+     * @return  string|bool false if a problem occurs, the thumbnail image data otherwise
+     */
+    public function generate_image_thumbnail($width, $height) {
+        if (empty($width) or empty($height)) {
+            return false;
+        }
+
+        $content = $this->get_content();
+
+        // Fetch the image information for this image.
+        $imageinfo = @getimagesizefromstring($content);
+        if (empty($imageinfo)) {
+            return false;
+        }
+
+        // Create a new image from the file.
+        $original = @imagecreatefromstring($content);
+
+        // Generate the thumbnail.
+        return generate_image_thumbnail_from_image($original, $imageinfo, $width, $height);
+    }
+
+    /**
+     * Generate a resized image for this stored_file.
+     *
+     * @param int|null $width The desired width, or null to only use the height.
+     * @param int|null $height The desired height, or null to only use the width.
+     * @return string|false False when a problem occurs, else the image data.
+     */
+    public function resize_image($width, $height) {
+        global $CFG;
+        require_once($CFG->libdir . '/gdlib.php');
+
+        $content = $this->get_content();
+
+        // Fetch the image information for this image.
+        $imageinfo = @getimagesizefromstring($content);
+        if (empty($imageinfo)) {
+            return false;
+        }
+
+        // Create a new image from the file.
+        $original = @imagecreatefromstring($content);
+
+        // Generate the resized image.
+        return resize_image_from_image($original, $imageinfo, $width, $height);
+    }
+
+    /**
+     * Check whether the supplied file is the same as this file.
+     *
+     * @param   string $path The path to the file on disk
+     * @return  boolean
+     */
+    public function compare_to_path($path) {
+        return $this->get_contenthash() === file_storage::hash_from_path($path);
+    }
+
+    /**
+     * Check whether the supplied content is the same as this file.
+     *
+     * @param   string $content The file content
+     * @return  boolean
+     */
+    public function compare_to_string($content) {
+        return $this->get_contenthash() === file_storage::hash_from_string($content);
     }
 }

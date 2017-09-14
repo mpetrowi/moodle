@@ -44,7 +44,7 @@ $PAGE->set_url($url);
 
 /// basic access checks
 if (!$course = $DB->get_record('course', array('id' => $courseid))) {
-    print_error('nocourseid');
+    print_error('invalidcourseid');
 }
 
 if (!$item = $DB->get_record('grade_items', array('id' => $itemid))) {
@@ -94,7 +94,6 @@ print_grade_page_head($COURSE->id, 'report', 'grader', $reportname);
 
 echo $report->group_selector;
 echo '<div class="clearer"></div>';
-// echo $report->get_toggles_html();
 
 //show warnings if any
 foreach($warnings as $warning) {

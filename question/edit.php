@@ -24,7 +24,7 @@
  */
 
 
-require_once(dirname(__FILE__) . '/../config.php');
+require_once(__DIR__ . '/../config.php');
 require_once($CFG->dirroot . '/question/editlib.php');
 
 list($thispageurl, $contexts, $cmid, $cm, $module, $pagevars) =
@@ -36,7 +36,7 @@ if (($lastchanged = optional_param('lastchanged', 0, PARAM_INT)) !== 0) {
 }
 $PAGE->set_url($url);
 
-$questionbank = new question_bank_view($contexts, $thispageurl, $COURSE, $cm);
+$questionbank = new core_question\bank\view($contexts, $thispageurl, $COURSE, $cm);
 $questionbank->process_actions();
 
 // TODO log this page view.
@@ -46,6 +46,10 @@ $streditingquestions = get_string('editquestions', 'question');
 $PAGE->set_title($streditingquestions);
 $PAGE->set_heading($COURSE->fullname);
 echo $OUTPUT->header();
+
+// Print horizontal nav if needed.
+$renderer = $PAGE->get_renderer('core_question', 'bank');
+echo $renderer->extra_horizontal_navigation();
 
 echo '<div class="questionbankwindow boxwidthwide boxaligncenter">';
 $questionbank->display('questions', $pagevars['qpage'], $pagevars['qperpage'],

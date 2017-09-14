@@ -1,9 +1,10 @@
 <?php
 
-    // Allows the admin to configure blocks (hide/show, delete and configure)
+    // Allows the admin to configure blocks (hide/show, uninstall and configure)
 
     require_once('../config.php');
     require_once($CFG->libdir.'/adminlib.php');
+    require_once($CFG->libdir.'/blocklib.php');
     require_once($CFG->libdir.'/tablelib.php');
 
     admin_externalpage_setup('manageblocks');
@@ -11,14 +12,13 @@
     $confirm  = optional_param('confirm', 0, PARAM_BOOL);
     $hide     = optional_param('hide', 0, PARAM_INT);
     $show     = optional_param('show', 0, PARAM_INT);
-    $delete   = optional_param('delete', 0, PARAM_INT);
     $unprotect = optional_param('unprotect', 0, PARAM_INT);
     $protect = optional_param('protect', 0, PARAM_INT);
 
 /// Print headings
 
     $strmanageblocks = get_string('manageblocks');
-    $strdelete = get_string('delete');
+    $struninstall = get_string('uninstallplugin', 'core_admin');
     $strversion = get_string('version');
     $strhide = get_string('hide');
     $strshow = get_string('show');
@@ -37,6 +37,8 @@
             print_error('blockdoesnotexist', 'error');
         }
         $DB->set_field('block', 'visible', '0', array('id'=>$block->id));      // Hide block
+        add_to_config_log('block_visibility', $block->visible, '0', $block->name);
+        core_plugin_manager::reset_caches();
         admin_get_root(true, false);  // settings not required - only pages
     }
 
@@ -45,67 +47,22 @@
             print_error('blockdoesnotexist', 'error');
         }
         $DB->set_field('block', 'visible', '1', array('id'=>$block->id));      // Show block
+        add_to_config_log('block_visibility', $block->visible, '1', $block->name);
+        core_plugin_manager::reset_caches();
         admin_get_root(true, false);  // settings not required - only pages
     }
 
-    if (!isset($CFG->undeletableblocktypes) || (!is_array($CFG->undeletableblocktypes) && !is_string($CFG->undeletableblocktypes))) {
-        $undeletableblocktypes = array('navigation', 'settings');
-    } else if (is_string($CFG->undeletableblocktypes)) {
-        $undeletableblocktypes = explode(',', $CFG->undeletableblocktypes);
-    } else {
-        $undeletableblocktypes = $CFG->undeletableblocktypes;
-    }
-
     if (!empty($protect) && confirm_sesskey()) {
-        if (!$block = $DB->get_record('block', array('id'=>$protect))) {
-            print_error('blockdoesnotexist', 'error');
-        }
-        if (!in_array($block->name, $undeletableblocktypes)) {
-            $undeletableblocktypes[] = $block->name;
-            set_config('undeletableblocktypes', implode(',', $undeletableblocktypes));
-        }
+        block_manager::protect_block((int)$protect);
         admin_get_root(true, false);  // settings not required - only pages
     }
 
     if (!empty($unprotect) && confirm_sesskey()) {
-        if (!$block = $DB->get_record('block', array('id'=>$unprotect))) {
-            print_error('blockdoesnotexist', 'error');
-        }
-        if (in_array($block->name, $undeletableblocktypes)) {
-            $undeletableblocktypes = array_diff($undeletableblocktypes, array($block->name));
-            set_config('undeletableblocktypes', implode(',', $undeletableblocktypes));
-        }
+        block_manager::unprotect_block((int)$unprotect);
         admin_get_root(true, false);  // settings not required - only pages
     }
 
-    if (!empty($delete) && confirm_sesskey()) {
-        echo $OUTPUT->header();
-        echo $OUTPUT->heading($strmanageblocks);
-
-        if (!$block = blocks_get_record($delete)) {
-            print_error('blockdoesnotexist', 'error');
-        }
-
-        if (get_string_manager()->string_exists('pluginname', "block_$block->name")) {
-            $strblockname = get_string('pluginname', "block_$block->name");
-        } else {
-            $strblockname = $block->name;
-        }
-
-        if (!$confirm) {
-            echo $OUTPUT->confirm(get_string('blockdeleteconfirm', '', $strblockname), 'blocks.php?delete='.$block->id.'&confirm=1', 'blocks.php');
-            echo $OUTPUT->footer();
-            exit;
-
-        } else {
-            uninstall_plugin('block', $block->name);
-
-            $a = new stdClass();
-            $a->block = $strblockname;
-            $a->directory = $CFG->dirroot.'/blocks/'.$block->name;
-            notice(get_string('blockdeletefiles', '', $a), 'blocks.php');
-        }
-    }
+    $undeletableblocktypes = block_manager::get_undeletable_block_types();
 
     echo $OUTPUT->header();
     echo $OUTPUT->heading($strmanageblocks);
@@ -124,10 +81,11 @@
 
     $table = new flexible_table('admin-blocks-compatible');
 
-    $table->define_columns(array('name', 'instances', 'version', 'hideshow', 'undeletable', 'delete', 'settings'));
-    $table->define_headers(array($strname, $strcourses, $strversion, $strhide.'/'.$strshow, $strprotecthdr, $strdelete, $strsettings));
+    $table->define_columns(array('name', 'instances', 'version', 'hideshow', 'undeletable', 'settings', 'uninstall'));
+    $table->define_headers(array($strname, $strcourses, $strversion, $strhide.'/'.$strshow, $strprotecthdr, $strsettings, $struninstall));
     $table->define_baseurl($CFG->wwwroot.'/'.$CFG->admin.'/blocks.php');
-    $table->set_attribute('class', 'compatibleblockstable blockstable generaltable');
+    $table->set_attribute('class', 'admintable blockstable generaltable');
+    $table->set_attribute('id', 'compatibleblockstable');
     $table->setup();
     $tablerows = array();
 
@@ -141,17 +99,18 @@
             $blocknames[$blockid] = $blockname;
         }
     }
-    collatorlib::asort($blocknames);
+    core_collator::asort($blocknames);
 
     foreach ($blocknames as $blockid=>$strblockname) {
         $block = $blocks[$blockid];
         $blockname = $block->name;
+        $dbversion = get_config('block_'.$block->name, 'version');
 
         if (!file_exists("$CFG->dirroot/blocks/$blockname/block_$blockname.php")) {
             $blockobject  = false;
             $strblockname = '<span class="notifyproblem">'.$strblockname.' ('.get_string('missingfromdisk').')</span>';
             $plugin = new stdClass();
-            $plugin->version = $block->version;
+            $plugin->version = $dbversion;
 
         } else {
             $plugin = new stdClass();
@@ -166,7 +125,11 @@
             }
         }
 
-        $delete = '<a href="blocks.php?delete='.$blockid.'&amp;sesskey='.sesskey().'">'.$strdelete.'</a>';
+        if ($uninstallurl = core_plugin_manager::instance()->get_uninstall_url('block_'.$blockname, 'manage')) {
+            $uninstall = html_writer::link($uninstallurl, $struninstall);
+        } else {
+            $uninstall = '';
+        }
 
         $settings = ''; // By default, no configuration
         if ($blockobject and $blockobject->has_config()) {
@@ -176,8 +139,12 @@
                 $settings = '<a href="' . $blocksettings->url .  '">' . get_string('settings') . '</a>';
             } else if ($blocksettings instanceof admin_settingpage) {
                 $settings = '<a href="'.$CFG->wwwroot.'/'.$CFG->admin.'/settings.php?section=blocksetting'.$block->name.'">'.$strsettings.'</a>';
-            } else {
-                $settings = '<a href="block.php?block='.$blockid.'">'.$strsettings.'</a>';
+            } else if (!file_exists($CFG->dirroot.'/blocks/'.$block->name.'/settings.php')) {
+                // If the block's settings node was not found, we check that the block really provides the settings.php file.
+                // Note that blocks can inject their settings to other nodes in the admin tree without using the default locations.
+                // This can be done by assigning null to $setting in settings.php and it is a valid case.
+                debugging('Warning: block_'.$block->name.' returns true in has_config() but does not provide a settings.php file',
+                    DEBUG_DEVELOPER);
             }
         }
 
@@ -201,17 +168,17 @@
             $visible = '';
         } else if ($blocks[$blockid]->visible) {
             $visible = '<a href="blocks.php?hide='.$blockid.'&amp;sesskey='.sesskey().'" title="'.$strhide.'">'.
-                       '<img src="'.$OUTPUT->pix_url('i/hide') . '" class="icon" alt="'.$strhide.'" /></a>';
+                       $OUTPUT->pix_icon('t/hide', $strhide) . '</a>';
         } else {
             $visible = '<a href="blocks.php?show='.$blockid.'&amp;sesskey='.sesskey().'" title="'.$strshow.'">'.
-                       '<img src="'.$OUTPUT->pix_url('i/show') . '" class="icon" alt="'.$strshow.'" /></a>';
-            $class = ' class="dimmed_text"'; // Leading space required!
+                       $OUTPUT->pix_icon('t/show', $strshow) . '</a>';
+            $class = 'dimmed_text';
         }
 
-        if ($block->version == $plugin->version) {
-            $version = $block->version;
+        if ($dbversion == $plugin->version) {
+            $version = $dbversion;
         } else {
-            $version = "$block->version ($plugin->version)";
+            $version = "$dbversion ($plugin->version)";
         }
 
         if (!$blockobject) {
@@ -219,22 +186,22 @@
             $undeletable = '';
         } else if (in_array($blockname, $undeletableblocktypes)) {
             $undeletable = '<a href="blocks.php?unprotect='.$blockid.'&amp;sesskey='.sesskey().'" title="'.$strunprotect.'">'.
-                       '<img src="'.$OUTPUT->pix_url('t/unlock') . '" class="icon" alt="'.$strunprotect.'" /></a>';
+                       $OUTPUT->pix_icon('t/unlock', $strunprotect) . '</a>';
         } else {
             $undeletable = '<a href="blocks.php?protect='.$blockid.'&amp;sesskey='.sesskey().'" title="'.$strprotect.'">'.
-                       '<img src="'.$OUTPUT->pix_url('t/unlock_gray') . '" class="icon" alt="'.$strprotect.'" /></a>';
+                       $OUTPUT->pix_icon('t/lock', $strprotect) . '</a>';
         }
 
         $row = array(
-            '<span'.$class.'>'.$strblockname.'</span>',
+            $strblockname,
             $blocklist,
-            '<span'.$class.'>'.$version.'</span>',
+            $version,
             $visible,
             $undeletable,
-            $delete,
-            $settings
+            $settings,
+            $uninstall,
         );
-        $table->add_data($row);
+        $table->add_data($row, $class);
     }
 
     $table->print_html();
@@ -244,8 +211,8 @@
 
         $table = new flexible_table('admin-blocks-incompatible');
 
-        $table->define_columns(array('block', 'delete'));
-        $table->define_headers(array($strname, $strdelete));
+        $table->define_columns(array('block', 'uninstall'));
+        $table->define_headers(array($strname, $struninstall));
         $table->define_baseurl($CFG->wwwroot.'/'.$CFG->admin.'/blocks.php');
 
         $table->set_attribute('class', 'incompatibleblockstable generaltable');
@@ -253,9 +220,14 @@
         $table->setup();
 
         foreach ($incompatible as $block) {
+            if ($uninstallurl = core_plugin_manager::instance()->get_uninstall_url('block_'.$block->name, 'manage')) {
+                $uninstall = html_writer::link($uninstallurl, $struninstall);
+            } else {
+                $uninstall = '';
+            }
             $table->add_data(array(
                 $block->name,
-                '<a href="blocks.php?delete='.$block->id.'&amp;sesskey='.sesskey().'">'.$strdelete.'</a>',
+                $uninstall,
             ));
         }
         $table->print_html();

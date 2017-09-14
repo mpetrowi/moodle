@@ -18,8 +18,7 @@
 /**
  * Numerical
  *
- * @package    mod
- * @subpackage lesson
+ * @package mod_lesson
  * @copyright  2009 Sam Hemelryk
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  **/
@@ -58,6 +57,18 @@ class lesson_page_type_numerical extends lesson_page {
             $data->answer = s($attempt->useranswer);
         }
         $mform->set_data($data);
+
+        // Trigger an event question viewed.
+        $eventparams = array(
+            'context' => context_module::instance($PAGE->cm->id),
+            'objectid' => $this->properties->id,
+            'other' => array(
+                    'pagetype' => $this->get_typestring()
+                )
+            );
+
+        $event = \mod_lesson\event\question_viewed::create($eventparams);
+        $event->trigger();
         return $mform->display();
     }
     public function check_answer() {
@@ -68,20 +79,25 @@ class lesson_page_type_numerical extends lesson_page {
         $data = $mform->get_data();
         require_sesskey();
 
+        $formattextdefoptions = new stdClass();
+        $formattextdefoptions->noclean = true;
+        $formattextdefoptions->para = false;
+
         // set defaults
         $result->response = '';
         $result->newpageid = 0;
 
-        if (isset($data->answer)) {
-            // just doing default PARAM_RAW, not doing PARAM_INT because it could be a float
-            $result->useranswer = (float)$data->answer;
-        } else {
+        if (!isset($data->answer) || !is_numeric($data->answer)) {
             $result->noanswer = true;
             return $result;
+        } else {
+            // Just doing default PARAM_RAW, not doing PARAM_INT because it could be a float.
+            $result->useranswer = (float)$data->answer;
         }
         $result->studentanswer = $result->userresponse = $result->useranswer;
         $answers = $this->get_answers();
         foreach ($answers as $answer) {
+            $answer = parent::rewrite_answers_urls($answer);
             if (strpos($answer->answer, ':')) {
                 // there's a pairs of values
                 list($min, $max) = explode(':', $answer->answer);
@@ -94,7 +110,7 @@ class lesson_page_type_numerical extends lesson_page {
             }
             if (($result->useranswer >= $minimum) && ($result->useranswer <= $maximum)) {
                 $result->newpageid = $answer->jumpto;
-                $result->response = trim($answer->response);
+                $result->response = format_text($answer->response, $answer->responseformat, $formattextdefoptions);
                 if ($this->lesson->jumpto_is_correct($this->properties->id, $result->newpageid)) {
                     $result->correctanswer = true;
                 }
@@ -119,6 +135,7 @@ class lesson_page_type_numerical extends lesson_page {
         $options->para = false;
         $i = 1;
         foreach ($answers as $answer) {
+            $answer = parent::rewrite_answers_urls($answer, false);
             $cells = array();
             if ($this->lesson->custom && $answer->score > 0) {
                 // if the score is > 0, then it is correct
@@ -187,7 +204,8 @@ class lesson_page_type_numerical extends lesson_page {
                     $total = $stats["total"];
                     unset($stats["total"]);
                     foreach ($stats as $valentered => $ntimes) {
-                        $data = '<input type="text" size="50" disabled="disabled" readonly="readonly" value="'.s($valentered).'" />';
+                        $data = '<input class="form-control" type="text" size="50" ' .
+                                'disabled="disabled" readonly="readonly" value="'.s($valentered).'" />';
                         $percent = $ntimes / $total * 100;
                         $percent = round($percent, 2);
                         $percent .= "% ".get_string("enteredthis", "lesson");
@@ -197,9 +215,11 @@ class lesson_page_type_numerical extends lesson_page {
                     $answerdata->answers[] = array(get_string("nooneansweredthisquestion", "lesson"), " ");
                 }
                 $i++;
-            } else if ($useranswer != null && ($answer->id == $useranswer->answerid || ($answer == end($answers) && empty($answerdata)))) {
-                 // get in here when what the user entered is not one of the answers
-                $data = '<input type="text" size="50" disabled="disabled" readonly="readonly" value="'.s($useranswer->useranswer).'">';
+            } else if ($useranswer != null && ($answer->id == $useranswer->answerid || ($answer == end($answers) &&
+                    empty($answerdata->answers)))) {
+                // Get in here when the user answered or for the last answer.
+                $data = '<input class="form-control" type="text" size="50" ' .
+                        'disabled="disabled" readonly="readonly" value="'.s($useranswer->useranswer).'">';
                 if (isset($pagestats[$this->properties->id][$useranswer->useranswer])) {
                     $percent = $pagestats[$this->properties->id][$useranswer->useranswer] / $pagestats[$this->properties->id]["total"] * 100;
                     $percent = round($percent, 2);
@@ -210,7 +230,7 @@ class lesson_page_type_numerical extends lesson_page {
                 $answerdata->answers[] = array($data, $percent);
 
                 if ($answer->id == $useranswer->answerid) {
-                    if ($answer->response == NULL) {
+                    if ($answer->response == null) {
                         if ($useranswer->correct) {
                             $answerdata->response = get_string("thatsthecorrectanswer", "lesson");
                         } else {
@@ -245,13 +265,15 @@ class lesson_add_page_form_numerical extends lesson_add_page_form_base {
 
     public $qtype = 'numerical';
     public $qtypestring = 'numerical';
+    protected $answerformat = '';
+    protected $responseformat = LESSON_ANSWER_HTML;
 
     public function custom_definition() {
         for ($i = 0; $i < $this->_customdata['lesson']->maxanswers; $i++) {
             $this->_form->addElement('header', 'answertitle'.$i, get_string('answer').' '.($i+1));
-            $this->add_answer($i, NULL, ($i < 1));
+            $this->add_answer($i, null, ($i < 1));
             $this->add_response($i);
-            $this->add_jumpto($i, NULL, ($i == 0 ? LESSON_NEXTPAGE : LESSON_THISPAGE));
+            $this->add_jumpto($i, null, ($i == 0 ? LESSON_NEXTPAGE : LESSON_THISPAGE));
             $this->add_score($i, null, ($i===0)?1:0);
         }
     }
@@ -263,6 +285,9 @@ class lesson_display_answer_form_numerical extends moodleform {
         global $USER, $OUTPUT;
         $mform = $this->_form;
         $contents = $this->_customdata['contents'];
+
+        // Disable shortforms.
+        $mform->setDisableShortforms();
 
         $mform->addElement('header', 'pageheader');
 

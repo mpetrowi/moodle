@@ -22,25 +22,24 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU Public License
  */
 
+defined('MOODLE_INTERNAL') || die();
+
 /**
  * Upgrade code for the email message processor
  *
  * @param int $oldversion The version that we are upgrading from
  */
 function xmldb_message_email_upgrade($oldversion) {
-    global $CFG, $DB;
+    global $CFG;
 
-    $dbman = $DB->get_manager();
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
 
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
 
-    // Moodle v2.2.0 release upgrade line
-    // Put any upgrade step following this
-
-    // Moodle v2.3.0 release upgrade line
-    // Put any upgrade step following this
-
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }
-
-

@@ -18,8 +18,7 @@
 /**
  * Private url module utility functions
  *
- * @package    mod
- * @subpackage url
+ * @package    mod_url
  * @copyright  2009 Petr Skoda  {@link http://skodak.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -164,17 +163,12 @@ function url_print_header($url, $cm, $course) {
  * @param object $url
  * @param object $cm
  * @param object $course
- * @param bool $ignoresettings print even if not specified in modedit
+ * @param bool $notused This variable is no longer used.
  * @return void
  */
-function url_print_heading($url, $cm, $course, $ignoresettings=false) {
+function url_print_heading($url, $cm, $course, $notused = false) {
     global $OUTPUT;
-
-    $options = empty($url->displayoptions) ? array() : unserialize($url->displayoptions);
-
-    if ($ignoresettings or !empty($options['printheading'])) {
-        echo $OUTPUT->heading(format_string($url->name), 2, 'main', 'urlheading');
-    }
+    echo $OUTPUT->heading(format_string($url->name), 2);
 }
 
 /**
@@ -228,7 +222,7 @@ function url_display_frame($url, $cm, $course) {
         $title = strip_tags($courseshortname.': '.format_string($url->name));
         $framesize = $config->framesize;
         $modulename = s(get_string('modulename','url'));
-        $contentframetitle = format_string($url->name);
+        $contentframetitle = s(format_string($url->name));
         $dir = get_string('thisdirection', 'langconfig');
 
         $extframe = <<<EOF
@@ -311,18 +305,18 @@ function url_display_embed($url, $cm, $course) {
 
     $extension = resourcelib_get_extension($url->externalurl);
 
-    $mediarenderer = $PAGE->get_renderer('core', 'media');
+    $mediamanager = core_media_manager::instance($PAGE);
     $embedoptions = array(
-        core_media::OPTION_TRUSTED => true,
-        core_media::OPTION_BLOCK => true
+        core_media_manager::OPTION_TRUSTED => true,
+        core_media_manager::OPTION_BLOCK => true
     );
 
     if (in_array($mimetype, array('image/gif','image/jpeg','image/png'))) {  // It's an image
         $code = resourcelib_embed_image($fullurl, $title);
 
-    } else if ($mediarenderer->can_embed_url($moodleurl, $embedoptions)) {
+    } else if ($mediamanager->can_embed_url($moodleurl, $embedoptions)) {
         // Media (audio/video) file.
-        $code = $mediarenderer->embed_url($moodleurl, $title, 0, 0, $embedoptions);
+        $code = $mediamanager->embed_url($moodleurl, $title, 0, 0, $embedoptions);
 
     } else {
         // anything else - just try object tag enlarged as much as possible
@@ -427,8 +421,8 @@ function url_get_variable_options($config) {
         'userfullname'    => get_string('fullnameuser'),
         'useremail'       => get_string('email'),
         'usericq'         => get_string('icqnumber'),
-        'userphone1'      => get_string('phone').' 1',
-        'userphone2'      => get_string('phone2').' 2',
+        'userphone1'      => get_string('phone1'),
+        'userphone2'      => get_string('phone2'),
         'userinstitution' => get_string('institution'),
         'userdepartment'  => get_string('department'),
         'useraddress'     => get_string('address'),
@@ -496,7 +490,8 @@ function url_get_variable_values($url, $cm, $course, $config) {
         $values['userdepartment']  = $USER->department;
         $values['useraddress']     = $USER->address;
         $values['usercity']        = $USER->city;
-        $values['usertimezone']    = get_user_timezone_offset();
+        $now = new DateTime('now', core_date::get_user_timezone_object());
+        $values['usertimezone']    = $now->getOffset() / 3600.0; // Value in hours for BC.
         $values['userurl']         = $USER->url;
     }
 
@@ -540,21 +535,26 @@ function url_get_encrypted_parameter($url, $config) {
 /**
  * Optimised mimetype detection from general URL
  * @param $fullurl
- * @return string mimetype
+ * @param int $size of the icon.
+ * @return string|null mimetype or null when the filetype is not relevant.
  */
-function url_guess_icon($fullurl) {
+function url_guess_icon($fullurl, $size = null) {
     global $CFG;
     require_once("$CFG->libdir/filelib.php");
 
     if (substr_count($fullurl, '/') < 3 or substr($fullurl, -1) === '/') {
-        // most probably default directory - index.php, index.html, etc.
-        return file_extension_icon('.htm');
+        // Most probably default directory - index.php, index.html, etc. Return null because
+        // we want to use the default module icon instead of the HTML file icon.
+        return null;
     }
 
-    $icon = file_extension_icon($fullurl);
+    $icon = file_extension_icon($fullurl, $size);
+    $htmlicon = file_extension_icon('.htm', $size);
+    $unknownicon = file_extension_icon('', $size);
 
-    if ($icon === file_extension_icon('')) {
-        return file_extension_icon('.htm');
+    // We do not want to return those icon types, the module icon is more appropriate.
+    if ($icon === $unknownicon || $icon === $htmlicon) {
+        return null;
     }
 
     return $icon;

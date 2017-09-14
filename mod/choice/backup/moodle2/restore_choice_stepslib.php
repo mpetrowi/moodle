@@ -16,7 +16,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @package moodlecore
+ * @package    mod_choice
  * @subpackage backup-moodle2
  * @copyright 2010 onwards Eloy Lafuente (stronk7) {@link http://stronk7.com}
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -53,9 +53,10 @@ class restore_choice_activity_structure_step extends restore_activity_structure_
         $oldid = $data->id;
         $data->course = $this->get_courseid();
 
+        // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+        // See MDL-9367.
         $data->timeopen = $this->apply_date_offset($data->timeopen);
         $data->timeclose = $this->apply_date_offset($data->timeclose);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         // insert the choice record
         $newitemid = $DB->insert_record('choice', $data);
@@ -70,7 +71,6 @@ class restore_choice_activity_structure_step extends restore_activity_structure_
         $oldid = $data->id;
 
         $data->choiceid = $this->get_new_parentid('choice');
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('choice_options', $data);
         $this->set_mapping('choice_option', $oldid, $newitemid);
@@ -84,7 +84,6 @@ class restore_choice_activity_structure_step extends restore_activity_structure_
         $data->choiceid = $this->get_new_parentid('choice');
         $data->optionid = $this->get_mappingid('choice_option', $data->optionid);
         $data->userid = $this->get_mappingid('user', $data->userid);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('choice_answers', $data);
         // No need to save this mapping as far as nothing depend on it

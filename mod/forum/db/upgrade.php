@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -36,25 +35,54 @@
  * Please do not forget to use upgrade_set_timeout()
  * before any action that may take longer time to finish.
  *
- * @package mod-forum
+ * @package   mod_forum
  * @copyright 2003 onwards Eloy Lafuente (stronk7) {@link http://stronk7.com}
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+defined('MOODLE_INTERNAL') || die();
+
 function xmldb_forum_upgrade($oldversion) {
-    global $CFG, $DB, $OUTPUT;
+    global $CFG, $DB;
 
-    $dbman = $DB->get_manager(); // loads ddl manager and xmldb classes
+    $dbman = $DB->get_manager(); // Loads ddl manager and xmldb classes.
 
+    if ($oldversion < 2015120800) {
 
-    // Moodle v2.2.0 release upgrade line
-    // Put any upgrade step following this
+        // Add support for pinned discussions.
+        $table = new xmldb_table('forum_discussions');
+        $field = new xmldb_field('pinned', XMLDB_TYPE_INTEGER, '1', null, XMLDB_NOTNULL, null, '0', 'timeend');
 
-    // Moodle v2.3.0 release upgrade line
-    // Put any upgrade step following this
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
 
+        // Forum savepoint reached.
+        upgrade_mod_savepoint(true, 2015120800, 'forum');
+    }
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
+
+    if ($oldversion < 2016091200) {
+
+        // Define field lockdiscussionafter to be added to forum.
+        $table = new xmldb_table('forum');
+        $field = new xmldb_field('lockdiscussionafter', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, '0', 'displaywordcount');
+
+        // Conditionally launch add field lockdiscussionafter.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Forum savepoint reached.
+        upgrade_mod_savepoint(true, 2016091200, 'forum');
+    }
+
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
+
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }
-
-

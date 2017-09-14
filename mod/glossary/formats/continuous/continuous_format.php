@@ -2,17 +2,22 @@
 
 function glossary_show_entry_continuous($course, $cm, $glossary, $entry, $mode='', $hook='', $printicons=1, $aliases=false) {
 
-    global $USER;
+    global $USER, $OUTPUT;
 
     echo '<table class="glossarypost continuous" cellspacing="0">';
     echo '<tr valign="top">';
     echo '<td class="entry">';
     glossary_print_entry_approval($cm, $entry, $mode);
-    glossary_print_entry_attachment($entry, $cm, 'html', 'right');
     echo '<div class="concept">';
     glossary_print_entry_concept($entry);
     echo '</div> ';
     glossary_print_entry_definition($entry, $glossary, $cm);
+    glossary_print_entry_attachment($entry, $cm, 'html');
+
+    if (core_tag_tag::is_enabled('mod_glossary', 'glossary_entries')) {
+        echo $OUTPUT->tag_list(core_tag_tag::get_item_tags(
+            'mod_glossary', 'glossary_entries', $entry->id), null, 'glossary-tags');
+    }
     $entry->alias = '';
     echo '</td></tr>';
 

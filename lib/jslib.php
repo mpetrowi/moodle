@@ -23,7 +23,7 @@
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-//NOTE: do not verify MOODLE_INTERNAL here, this is used from themes too
+defined('MOODLE_INTERNAL') || die();
 
 /**
  * Send javascript file content with as much caching as possible
@@ -34,14 +34,15 @@
 function js_send_cached($jspath, $etag, $filename = 'javascript.php') {
     require(__DIR__ . '/xsendfilelib.php');
 
-    $lifetime = 60*60*24*60; // 60 days only - the revision may get incremented quite often
+    // 90 days only - based on Moodle point release cadence being every 3 months.
+    $lifetime = 60 * 60 * 24 * 90;
 
-    header('Etag: '.$etag);
+    header('Etag: "'.$etag.'"');
     header('Content-Disposition: inline; filename="'.$filename.'"');
     header('Last-Modified: '. gmdate('D, d M Y H:i:s', filemtime($jspath)) .' GMT');
     header('Expires: '. gmdate('D, d M Y H:i:s', time() + $lifetime) .' GMT');
     header('Pragma: ');
-    header('Cache-Control: public, max-age='.$lifetime);
+    header('Cache-Control: public, max-age='.$lifetime.', immutable');
     header('Accept-Ranges: none');
     header('Content-Type: application/javascript; charset=utf-8');
 
@@ -81,78 +82,17 @@ function js_send_uncached($js, $filename = 'javascript.php') {
  * @param string $etag
  */
 function js_send_unmodified($lastmodified, $etag) {
-    $lifetime = 60*60*24*60; // 60 days only - the revision may get incremented quite often
+    // 90 days only - based on Moodle point release cadence being every 3 months.
+    $lifetime = 60 * 60 * 24 * 90;
     header('HTTP/1.1 304 Not Modified');
     header('Expires: '. gmdate('D, d M Y H:i:s', time() + $lifetime) .' GMT');
     header('Cache-Control: public, max-age='.$lifetime);
     header('Content-Type: application/javascript; charset=utf-8');
-    header('Etag: '.$etag);
+    header('Etag: "'.$etag.'"');
     if ($lastmodified) {
         header('Last-Modified: '. gmdate('D, d M Y H:i:s', $lastmodified) .' GMT');
     }
     die;
-}
-
-/**
- * Minify javascript files
- * @param array $files
- * @return string
- */
-function js_minify($files) {
-    // setup include path
-    set_include_path(__DIR__ . '/minify/lib' . PATH_SEPARATOR . get_include_path());
-    require_once('Minify.php');
-
-    if (empty($files)) {
-        return '';
-    }
-
-    if (0 === stripos(PHP_OS, 'win')) {
-        Minify::setDocRoot(); // IIS may need help
-    }
-    // disable all caching, we do it in moodle
-    Minify::setCache(null, false);
-
-    $options = array(
-        'bubbleCssImports' => false,
-        // Don't gzip content we just want text for storage
-        'encodeOutput' => false,
-        // Maximum age to cache, not used but required
-        'maxAge' => 1800,
-        // The files to minify
-        'files' => $files,
-        // Turn orr URI rewriting
-        'rewriteCssUris' => false,
-        // This returns the CSS rather than echoing it for display
-        'quiet' => true
-    );
-
-    $error = 'unknown';
-    try {
-        $result = Minify::serve('Files', $options);
-        if ($result['success']) {
-            return $result['content'];
-        }
-    } catch (Exception $e) {
-        $error = $e->getMessage();
-        $error = str_replace("\r", ' ', $error);
-        $error = str_replace("\n", ' ', $error);
-    }
-
-    // minification failed - try to inform the theme developer and include the non-minified version
-    $js = <<<EOD
-try {console.log('Error: Minimisation of javascript failed!');} catch (e) {}
-
-// Error: $error
-// Problem detected during javascript minimisation, please review the following code
-// =================================================================================
-
-
-EOD;
-    foreach ($files as $jsfile) {
-        $js .= file_get_contents($jsfile)."\n";
-    }
-    return $js;
 }
 
 /**

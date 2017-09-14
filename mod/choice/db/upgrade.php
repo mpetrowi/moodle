@@ -1,5 +1,4 @@
 <?php
-
 // This file keeps track of upgrades to
 // the choice module
 //
@@ -20,20 +19,19 @@
 // Please do not forget to use upgrade_set_timeout()
 // before any action that may take longer time to finish.
 
+defined('MOODLE_INTERNAL') || die();
+
 function xmldb_choice_upgrade($oldversion) {
-    global $CFG, $DB;
+    global $CFG;
 
-    $dbman = $DB->get_manager();
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
 
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
 
-    // Moodle v2.2.0 release upgrade line
-    // Put any upgrade step following this
-
-    // Moodle v2.3.0 release upgrade line
-    // Put any upgrade step following this
-
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }
-
-

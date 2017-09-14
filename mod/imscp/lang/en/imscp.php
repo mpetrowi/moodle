@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -18,8 +17,7 @@
 /**
  * Strings for component 'imscp', language 'en', branch 'MOODLE_20_STABLE'
  *
- * @package    mod
- * @subpackage imscp
+ * @package mod_imscp
  * @copyright  1999 onwards Martin Dougiamas  {@link http://moodle.com}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -30,6 +28,10 @@ $string['contentheader'] = 'Content';
 $string['deploymenterror'] = 'Content package error!';
 $string['keepold'] = 'Archive packages';
 $string['keepoldexplain'] = 'How many packages should be archived?';
+$string['indicator:cognitivedepth'] = 'IMS pkg cognitive';
+$string['indicator:cognitivedepth_help'] = 'This indicator is based on the cognitive depth reached by the student in an IMS content package resource.';
+$string['indicator:socialbreadth'] = 'IMS pkg social';
+$string['indicator:socialbreadth_help'] = 'This indicator is based on the social depth reached by the student in an IMS content package resource.';
 $string['imscp:addinstance'] = 'Add a new IMS content package';
 $string['imscp:view'] = 'View IMS content';
 $string['modulename'] = 'IMS content package';
@@ -45,4 +47,5 @@ $string['page-mod-imscp-x'] = 'Any IMS content package module page';
 $string['packagefile'] = 'Package file';
 $string['pluginadministration'] = 'IMSCP administration';
 $string['pluginname'] = 'IMS content package';
+$string['search:activity'] = 'IMS content package - resource information';
 $string['toc'] = 'TOC';

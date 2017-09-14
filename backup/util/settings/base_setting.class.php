@@ -70,6 +70,7 @@ abstract class base_setting {
     protected $visibility; // visibility of the setting (setting_base::VISIBLE/setting_base::HIDDEN)
     protected $status; // setting_base::NOT_LOCKED/setting_base::LOCKED_BY_PERMISSION...
 
+    /** @var setting_dependency[] */
     protected $dependencies = array(); // array of dependent (observer) objects (usually setting_base ones)
     protected $dependenton = array();
 
@@ -200,6 +201,12 @@ abstract class base_setting {
 
     public function set_status($status) {
         $status = $this->validate_status($status);
+
+        if (($this->status == base_setting::LOCKED_BY_PERMISSION || $this->status == base_setting::LOCKED_BY_CONFIG)
+                && $status == base_setting::LOCKED_BY_HIERARCHY) {
+            // Lock by permission or config can not be overriden by lock by hierarchy.
+            return;
+        }
 
         // If the setting is being unlocked first check whether an other settings
         // this setting is dependent on are locked. If they are then we still don't
@@ -402,6 +409,27 @@ abstract class base_setting {
         }
         $this->dependencies[$dependentsetting->get_name()] = $dependency;
         $dependency->get_dependent_setting()->register_dependent_dependency($dependency);
+    }
+
+    /**
+     * Get the PARAM_XXXX validation to be applied to the setting
+     *
+     * @return string The PARAM_XXXX constant of null if the setting type is not defined
+     */
+    public function get_param_validation() {
+        switch ($this->vtype) {
+            case self::IS_BOOLEAN:
+                return PARAM_BOOL;
+            case self::IS_INTEGER:
+                return PARAM_INT;
+            case self::IS_FILENAME:
+                return PARAM_FILE;
+            case self::IS_PATH:
+                return PARAM_PATH;
+            case self::IS_TEXT:
+                return PARAM_TEXT;
+        }
+        return null;
     }
 
 // Protected API starts here

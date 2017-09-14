@@ -43,12 +43,17 @@ class data_field_latlong extends data_field_base {
     );
     // Other map sources listed at http://kvaleberg.com/extensions/mapsources/index.php?params=51_30.4167_N_0_7.65_W_region:earth
 
-    function display_add_field($recordid=0) {
-        global $CFG, $DB;
+    function display_add_field($recordid = 0, $formdata = null) {
+        global $CFG, $DB, $OUTPUT;
 
         $lat = '';
         $long = '';
-        if ($recordid) {
+        if ($formdata) {
+            $fieldname = 'field_' . $this->field->id . '_0';
+            $lat = $formdata->$fieldname;
+            $fieldname = 'field_' . $this->field->id . '_1';
+            $long = $formdata->$fieldname;
+        } else if ($recordid) {
             if ($content = $DB->get_record('data_content', array('fieldid'=>$this->field->id, 'recordid'=>$recordid))) {
                 $lat  = $content->content;
                 $long = $content->content1;
@@ -56,9 +61,28 @@ class data_field_latlong extends data_field_base {
         }
         $str = '<div title="'.s($this->field->description).'">';
         $str .= '<fieldset><legend><span class="accesshide">'.$this->field->name.'</span></legend>';
-        $str .= '<table><tr><td align="right">';
-        $str .= '<label for="field_'.$this->field->id.'_0">' . get_string('latitude', 'data') . '</label></td><td><input type="text" name="field_'.$this->field->id.'_0" id="field_'.$this->field->id.'_0" value="'.s($lat).'" size="10" />°N</td></tr>';
-        $str .= '<tr><td align="right"><label for="field_'.$this->field->id.'_1">' . get_string('longitude', 'data') . '</label></td><td><input type="text" name="field_'.$this->field->id.'_1" id="field_'.$this->field->id.'_1" value="'.s($long).'" size="10" />°E</td></tr>';
+        $str .= '<table class="form-inline"><tr><td align="right">';
+        $classes = 'mod-data-input form-control-static';
+        $str .= '<label for="field_'.$this->field->id.'_0" class="' . $classes . '">' . get_string('latitude', 'data');
+        if ($this->field->required) {
+            $str .= $OUTPUT->pix_icon('req', get_string('requiredelement', 'form'));
+        }
+        $classes = 'form-control m-x-1';
+        $str .= '</label></td><td>';
+        $str .= '<input class="' . $classes . '" type="text" name="field_'.$this->field->id.'_0" ';
+        $str .= ' id="field_'.$this->field->id.'_0" value="';
+        $str .= s($lat).'" size="10" />°N</td></tr>';
+        $classes = 'mod-data-input form-control-static';
+        $str .= '<tr><td align="right"><label for="field_'.$this->field->id.'_1" class="' . $classes . '">';
+        $str .= get_string('longitude', 'data');
+        if ($this->field->required) {
+            $str .= $OUTPUT->pix_icon('req', get_string('requiredelement', 'form'));
+        }
+        $classes = 'form-control m-x-1';
+        $str .= '</label></td><td><input class="' . $classes . '" type="text" ';
+        $str .= 'name="field_'.$this->field->id.'_1" id="field_'.$this->field->id.'_1" value="';
+        $str .= s($long).'" size="10" />°E</td>';
+        $str .= '</tr>';
         $str .= '</table>';
         $str .= '</fieldset>';
         $str .= '</div>';
@@ -78,17 +102,28 @@ class data_field_latlong extends data_field_base {
 
         $options = array();
         foreach ($latlongsrs as $latlong) {
-            $options[$latlong->la . ',' . $latlong->lo] = $latlong->la . ',' . $latlong->lo;
+            $latitude = format_float($latlong->la, 4);
+            $longitude = format_float($latlong->lo, 4);
+            if ($latitude && $longitude) {
+                $options[$latlong->la . ',' . $latlong->lo] = $latitude . ' ' . $longitude;
+            }
         }
         $latlongsrs->close();
 
-        $return = html_writer::label(get_string('latlong', 'data'), 'menuf_'.$this->field->id, false, array('class' => 'accesshide'));
-        $return .= html_writer::select($options, 'f_'.$this->field->id, $value);
+        $classes = array('class' => 'accesshide');
+        $return = html_writer::label(get_string('latlong', 'data'), 'menuf_'.$this->field->id, false, $classes);
+        $classes = array('class' => 'custom-select');
+        $return .= html_writer::select($options, 'f_'.$this->field->id, $value, array('' => get_string('menuchoose', 'data')),
+            $classes);
        return $return;
     }
 
-    function parse_search_field() {
-        return optional_param('f_'.$this->field->id, '', PARAM_NOTAGS);
+    public function parse_search_field($defaults = null) {
+        $param = 'f_'.$this->field->id;
+        if (empty($defaults[$param])) {
+            $defaults = array($param => '');
+        }
+        return optional_param($param, $defaults[$param], PARAM_NOTAGS);
     }
 
     function generate_sql($tablealias, $value) {
@@ -120,15 +155,16 @@ class data_field_latlong extends data_field_base {
             if (strlen($long) < 1) {
                 return false;
             }
+            // We use format_float to display in the regional format.
             if($lat < 0) {
-                $compasslat = sprintf('%01.4f', -$lat) . '°S';
+                $compasslat = format_float(-$lat, 4) . '°S';
             } else {
-                $compasslat = sprintf('%01.4f', $lat) . '°N';
+                $compasslat = format_float($lat, 4) . '°N';
             }
             if($long < 0) {
-                $compasslong = sprintf('%01.4f', -$long) . '°W';
+                $compasslong = format_float(-$long, 4) . '°W';
             } else {
-                $compasslong = sprintf('%01.4f', $long) . '°E';
+                $compasslong = format_float($long, 4) . '°E';
             }
 
             // Now let's create the jump-to-services link
@@ -149,12 +185,12 @@ class data_field_latlong extends data_field_base {
             if(sizeof($servicesshown)==1 && $servicesshown[0]) {
                 $str = " <a href='"
                           . str_replace(array_keys($urlreplacements), array_values($urlreplacements), $this->linkoutservices[$servicesshown[0]])
-                          ."' title='$servicesshown[0]'>$compasslat, $compasslong</a>";
+                          ."' title='$servicesshown[0]'>$compasslat $compasslong</a>";
             } elseif (sizeof($servicesshown)>1) {
                 $str = '<form id="latlongfieldbrowse">';
                 $str .= "$compasslat, $compasslong\n";
                 $str .= "<label class='accesshide' for='jumpto'>". get_string('jumpto') ."</label>";
-                $str .= "<select id='jumpto' name='jumpto'>";
+                $str .= '<select id="jumpto" name="jumpto" class="custom-select">';
                 foreach($servicesshown as $servicename){
                     // Add a link to a service
                     $str .= "\n  <option value='"
@@ -163,7 +199,8 @@ class data_field_latlong extends data_field_base {
                 }
                 // NB! If you are editing this, make sure you don't break the javascript reference "previousSibling"
                 //   which allows the "Go" button to refer to the drop-down selector.
-                $str .= "\n</select><input type='button' value='" . get_string('go') . "' onclick='if(previousSibling.value){self.location=previousSibling.value}'/>";
+                $str .= '\n</select><input type="button" class="btn m-l-1 btn-secondary" value="' . get_string('go');
+                $str .= '" onclick="if(previousSibling.value){self.location=previousSibling.value}"/>';
                 $str .= '</form>';
             } else {
                 $str = "$compasslat, $compasslong";
@@ -174,12 +211,23 @@ class data_field_latlong extends data_field_base {
         return false;
     }
 
+    function update_content_import($recordid, $value, $name='') {
+        $values = explode(" ", $value, 2);
+
+        foreach ($values as $index => $value) {
+            $this->update_content($recordid, $value, $name . '_' . $index);
+        }
+    }
+
     function update_content($recordid, $value, $name='') {
         global $DB;
 
         $content = new stdClass();
         $content->fieldid = $this->field->id;
         $content->recordid = $recordid;
+        // When updating these values (which might be region formatted) we should format
+        // the float to allow for a consistent float format in the database.
+        $value = unformat_float($value);
         $value = trim($value);
         if (strlen($value) > 0) {
             $value = floatval($value);
@@ -213,9 +261,56 @@ class data_field_latlong extends data_field_base {
     }
 
     function export_text_value($record) {
+        // The content here is from the database and does not require location formating.
         return sprintf('%01.4f', $record->content) . ' ' . sprintf('%01.4f', $record->content1);
     }
 
+    /**
+     * Check if a field from an add form is empty
+     *
+     * @param mixed $value
+     * @param mixed $name
+     * @return bool
+     */
+    function notemptyfield($value, $name) {
+        return isset($value) && !($value == '');
+    }
+
+    /**
+     * Validate values for this field.
+     * Both the Latitude and the Longitude fields need to be filled in.
+     *
+     * @param array $values The entered values for the lat. and long.
+     * @return string|bool Error message or false.
+     */
+    public function field_validation($values) {
+        $valuecount = 0;
+        // The lat long class has two values that need to be checked.
+        foreach ($values as $value) {
+            if (isset($value->value) && !($value->value == '')) {
+                $valuecount++;
+            }
+        }
+        // If we have nothing filled in or both filled in then everything is okay.
+        if ($valuecount == 0 || $valuecount == 2) {
+            return false;
+        }
+        // If we get here then only one field has been filled in.
+        return get_string('latlongboth', 'data');
+    }
+
+    /**
+     * Return the plugin configs for external functions.
+     *
+     * @return array the list of config parameters
+     * @since Moodle 3.3
+     */
+    public function get_config_for_external() {
+        // Return all the config parameters.
+        $configs = [];
+        for ($i = 1; $i <= 10; $i++) {
+            $configs["param$i"] = $this->field->{"param$i"};
+        }
+        return $configs;
+    }
 }
-
-

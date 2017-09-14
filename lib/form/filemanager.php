@@ -30,6 +30,7 @@ global $CFG;
 require_once('HTML/QuickForm/element.php');
 require_once($CFG->dirroot.'/lib/filelib.php');
 require_once($CFG->dirroot.'/repository/lib.php');
+require_once('templatable_form_element.php');
 
 /**
  * Filemanager form element
@@ -40,7 +41,11 @@ require_once($CFG->dirroot.'/repository/lib.php');
  * @copyright 2009 Dongsheng Cai <dongsheng@moodle.com>
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class MoodleQuickForm_filemanager extends HTML_QuickForm_element {
+class MoodleQuickForm_filemanager extends HTML_QuickForm_element implements templatable {
+    use templatable_form_element {
+        export_for_template as export_for_template_base;
+    }
+
     /** @var string html for help button, if empty then no help will icon will be dispalyed. */
     public $_helpbutton = '';
 
@@ -48,7 +53,8 @@ class MoodleQuickForm_filemanager extends HTML_QuickForm_element {
     // PHP doesn't support 'key' => $value1 | $value2 in class definition
     // We cannot do $_options = array('return_types'=> FILE_INTERNAL | FILE_REFERENCE);
     // So I have to set null here, and do it in constructor
-    protected $_options    = array('mainfile'=>'', 'subdirs'=>1, 'maxbytes'=>-1, 'maxfiles'=>-1, 'accepted_types'=>'*', 'return_types'=> null);
+    protected $_options = array('mainfile' => '', 'subdirs' => 1, 'maxbytes' => -1, 'maxfiles' => -1,
+            'accepted_types' => '*', 'return_types' =>  null, 'areamaxbytes' => FILE_AREA_MAX_BYTES_UNLIMITED);
 
     /**
      * Constructor
@@ -59,7 +65,7 @@ class MoodleQuickForm_filemanager extends HTML_QuickForm_element {
      *              or an associative array
      * @param array $options set of options to initalize filemanager
      */
-    function MoodleQuickForm_filemanager($elementName=null, $elementLabel=null, $attributes=null, $options=null) {
+    public function __construct($elementName=null, $elementLabel=null, $attributes=null, $options=null) {
         global $CFG, $PAGE;
 
         $options = (array)$options;
@@ -72,10 +78,38 @@ class MoodleQuickForm_filemanager extends HTML_QuickForm_element {
             $this->_options['maxbytes'] = get_user_max_upload_file_size($PAGE->context, $CFG->maxbytes, $options['maxbytes']);
         }
         if (empty($options['return_types'])) {
-            $this->_options['return_types'] = (FILE_INTERNAL | FILE_REFERENCE);
+            $this->_options['return_types'] = (FILE_INTERNAL | FILE_REFERENCE | FILE_CONTROLLED_LINK);
         }
         $this->_type = 'filemanager';
-        parent::HTML_QuickForm_element($elementName, $elementLabel, $attributes);
+        parent::__construct($elementName, $elementLabel, $attributes);
+    }
+
+    /**
+     * Old syntax of class constructor. Deprecated in PHP7.
+     *
+     * @deprecated since Moodle 3.1
+     */
+    public function MoodleQuickForm_filemanager($elementName=null, $elementLabel=null, $attributes=null, $options=null) {
+        debugging('Use of class name as constructor is deprecated', DEBUG_DEVELOPER);
+        self::__construct($elementName, $elementLabel, $attributes, $options);
+    }
+
+    /**
+     * Called by HTML_QuickForm whenever form event is made on this element
+     *
+     * @param string $event Name of event
+     * @param mixed $arg event arguments
+     * @param object $caller calling object
+     * @return bool
+     */
+    function onQuickFormEvent($event, $arg, &$caller)
+    {
+        switch ($event) {
+            case 'createElement':
+                $caller->setType($arg[0], PARAM_INT);
+                break;
+        }
+        return parent::onQuickFormEvent($event, $arg, $caller);
     }
 
     /**
@@ -131,6 +165,24 @@ class MoodleQuickForm_filemanager extends HTML_QuickForm_element {
     function setMaxbytes($maxbytes) {
         global $CFG, $PAGE;
         $this->_options['maxbytes'] = get_user_max_upload_file_size($PAGE->context, $CFG->maxbytes, $maxbytes);
+    }
+
+    /**
+     * Returns the maximum size of the area.
+     *
+     * @return int
+     */
+    function getAreamaxbytes() {
+        return $this->_options['areamaxbytes'];
+    }
+
+    /**
+     * Sets the maximum size of the area.
+     *
+     * @param int $areamaxbytes size limit
+     */
+    function setAreamaxbytes($areamaxbytes) {
+        $this->_options['areamaxbytes'] = $areamaxbytes;
     }
 
     /**
@@ -237,17 +289,73 @@ class MoodleQuickForm_filemanager extends HTML_QuickForm_element {
         $options->accepted_types = $accepted_types;
         $options->return_types = $this->_options['return_types'];
         $options->context = $PAGE->context;
+        $options->areamaxbytes = $this->_options['areamaxbytes'];
 
         $html = $this->_getTabs();
         $fm = new form_filemanager($options);
         $output = $PAGE->get_renderer('core', 'files');
         $html .= $output->render($fm);
 
-        $html .= '<input value="'.$draftitemid.'" name="'.$elname.'" type="hidden" />';
+        $html .= html_writer::empty_tag('input', array('value' => $draftitemid, 'name' => $elname, 'type' => 'hidden'));
         // label element needs 'for' attribute work
-        $html .= '<input value="" id="id_'.$elname.'" type="hidden" />';
+        $html .= html_writer::empty_tag('input', array('value' => '', 'id' => 'id_'.$elname, 'type' => 'hidden'));
+
+        if (!empty($options->accepted_types) && $options->accepted_types != '*') {
+            $html .= html_writer::tag('p', get_string('filesofthesetypes', 'form'));
+            $util = new \core_form\filetypes_util();
+            $filetypes = $options->accepted_types;
+            $filetypedescriptions = $util->describe_file_types($filetypes);
+            $html .= $OUTPUT->render_from_template('core_form/filetypes-descriptions', $filetypedescriptions);
+        }
 
         return $html;
+    }
+
+    public function export_for_template(renderer_base $output) {
+        $context = $this->export_for_template_base($output);
+        $context['html'] = $this->toHtml();
+        return $context;
+    }
+
+    /**
+     * Check that all files have the allowed type.
+     *
+     * @param array $value Draft item id with the uploaded files.
+     * @return string|null Validation error message or null.
+     */
+    public function validateSubmitValue($value) {
+
+        $filetypesutil = new \core_form\filetypes_util();
+        $whitelist = $filetypesutil->normalize_file_types($this->_options['accepted_types']);
+
+        if (empty($whitelist) || $whitelist === ['*']) {
+            // Any file type is allowed, nothing to check here.
+            return;
+        }
+
+        $draftfiles = file_get_drafarea_files($value);
+        $wrongfiles = array();
+
+        if (empty($draftfiles)) {
+            // No file uploaded, nothing to check here.
+            return;
+        }
+
+        foreach ($draftfiles->list as $file) {
+            if (!$filetypesutil->is_allowed_file_type($file->filename, $whitelist)) {
+                $wrongfiles[] = $file->filename;
+            }
+        }
+
+        if ($wrongfiles) {
+            $a = array(
+                'whitelist' => implode(', ', $whitelist),
+                'wrongfiles' => implode(', ', $wrongfiles),
+            );
+            return get_string('err_wrongfileextension', 'core_form', $a);
+        }
+
+        return;
     }
 }
 
@@ -271,6 +379,7 @@ class form_filemanager implements renderable {
      * @param stdClass $options options for filemanager
      *   default options are:
      *       maxbytes=>-1,
+     *       areamaxbytes => FILE_AREA_MAX_BYTES_UNLIMITED,
      *       maxfiles=>-1,
      *       itemid=>0,
      *       subdirs=>false,
@@ -287,6 +396,7 @@ class form_filemanager implements renderable {
         require_once($CFG->dirroot. '/repository/lib.php');
         $defaults = array(
             'maxbytes'=>-1,
+            'areamaxbytes' => FILE_AREA_MAX_BYTES_UNLIMITED,
             'maxfiles'=>-1,
             'itemid'=>0,
             'subdirs'=>0,
@@ -310,7 +420,8 @@ class form_filemanager implements renderable {
             $defaults['defaultlicense'] = $CFG->sitedefaultlicense;
         }
         foreach ($defaults as $key=>$value) {
-            if (empty($options->$key)) {
+            // Using !isset() prevents us from overwriting falsey values with defaults (as empty() did).
+            if (!isset($options->$key)) {
                 $options->$key = $value;
             }
         }
@@ -343,6 +454,10 @@ class form_filemanager implements renderable {
         }
         $this->options->maxbytes = get_user_max_upload_file_size($context, $CFG->maxbytes, $coursebytes, $maxbytes);
 
+        $this->options->userprefs = array();
+        $this->options->userprefs['recentviewmode'] = get_user_preferences('filemanager_recentviewmode', '');
+        user_preference_allow_ajax_update('filemanager_recentviewmode', PARAM_INT);
+
         // building file picker options
         $params = new stdClass();
         $params->accepted_types = $options->accepted_types;
@@ -362,6 +477,7 @@ class form_filemanager implements renderable {
             'itemid'=>$this->options->itemid,
             'subdirs'=>$this->options->subdirs,
             'maxbytes'=>$this->options->maxbytes,
+            'areamaxbytes' => $this->options->areamaxbytes,
             'maxfiles'=>$this->options->maxfiles,
             'ctx_id'=>$PAGE->context->id, // TODO ?
             'course'=>$PAGE->course->id, // TODO ?

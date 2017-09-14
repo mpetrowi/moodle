@@ -24,7 +24,7 @@
 
 define('NO_MOODLE_COOKIES', true); // Session not used here.
 
-require(dirname(dirname(dirname(dirname(dirname(dirname(__FILE__)))))) . '/config.php');
+require(__DIR__ . '/../../../../../config.php');
 
 $PAGE->set_context(context_system::instance());
 $PAGE->set_url('/lib/editor/tinymce/plugins/moodleemoticon/dialog.php');
@@ -37,6 +37,7 @@ $plugin = $editor->get_plugin('moodleemoticon');
 
 $htmllang = get_html_lang();
 header('Content-Type: text/html; charset=utf-8');
+header('X-UA-Compatible: IE=edge');
 ?>
 <!DOCTYPE html>
 <html <?php echo $htmllang ?>

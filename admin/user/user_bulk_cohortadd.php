@@ -39,7 +39,8 @@ $users = $SESSION->bulk_users;
 $strnever = get_string('never');
 
 $cohorts = array(''=>get_string('choosedots'));
-$allcohorts = $DB->get_records('cohort');
+$allcohorts = $DB->get_records('cohort', null, 'name');
+
 foreach ($allcohorts as $c) {
     if (!empty($c->component)) {
         // external cohorts can not be modified
@@ -59,17 +60,14 @@ foreach ($allcohorts as $c) {
 unset($allcohorts);
 
 if (count($cohorts) < 2) {
-    echo $OUTPUT->header();
-    echo $OUTPUT->heading(get_string('bulkadd', 'core_cohort'));
-    echo $OUTPUT->notification(get_string('bulknocohort', 'core_cohort'));
-    echo $OUTPUT->continue_button(new moodle_url('/admin/user/user_bulk.php'));
-    echo $OUTPUT->footer();
-    die;
+    redirect(new moodle_url('/admin/user/user_bulk.php'), get_string('bulknocohort', 'core_cohort'));
 }
 
 $countries = get_string_manager()->get_list_of_countries(true);
+$namefields = get_all_user_name_fields(true);
 foreach ($users as $key => $id) {
-    $user = $DB->get_record('user', array('id'=>$id, 'deleted'=>0), 'id, firstname, lastname, username, email, country, lastaccess, city');
+    $user = $DB->get_record('user', array('id'=>$id, 'deleted'=>0), 'id, ' . $namefields . ', username,
+            email, country, lastaccess, city');
     $user->fullname = fullname($user, true);
     $user->country = @$countries[$user->country];
     unset($user->firstname);
@@ -115,7 +113,12 @@ foreach ($columns as $column) {
         $columndir = 'asc';
     } else {
         $columndir = ($dir == 'asc') ? 'desc' : 'asc';
-        $columnicon = ' <img src="'.$OUTPUT->pix_url('t/'.($dir == 'asc' ? 'down' : 'up' )).'" alt="" />';
+        $icon = 't/down';
+        $iconstr = $columndir;
+        if ($dir != 'asc') {
+            $icon = 't/up';
+        }
+        $columnicon = ' ' . $OUTPUT->pix_icon($icon, get_string($iconstr));
     }
     $table->head[] = '<a href="user_bulk_cohortadd.php?sort='.$column.'&amp;dir='.$columndir.'">'.$strtitle.'</a>'.$columnicon;
     $table->align[] = 'left';

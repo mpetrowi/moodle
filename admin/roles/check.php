@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -18,16 +17,15 @@
 /**
  * Shows the result of has_capability for every capability for a user in a context.
  *
- * @package    core
- * @subpackage role
+ * @package    core_role
  * @copyright  1999 onwards Martin Dougiamas (http://dougiamas.com)
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(__FILE__) . '/../../config.php');
-require_once($CFG->dirroot . '/' . $CFG->admin . '/roles/lib.php');
+require_once(__DIR__ . '/../../config.php');
 
-$contextid = required_param('contextid',PARAM_INT);
+$contextid = required_param('contextid', PARAM_INT);
+$returnurl  = optional_param('returnurl', null, PARAM_LOCALURL);
 
 list($context, $course, $cm) = get_context_info_array($contextid);
 
@@ -47,37 +45,52 @@ if ($course) {
     }
 }
 
-// security first
+// Security first.
 require_login($course, false, $cm);
 if (!has_any_capability(array('moodle/role:assign', 'moodle/role:safeoverride', 'moodle/role:override', 'moodle/role:manage'), $context)) {
-    print_error('nopermissions', 'error', '', get_string('checkpermissions', 'role'));
+    print_error('nopermissions', 'error', '', get_string('checkpermissions', 'core_role'));
 }
-$PAGE->set_url($url);
+
+navigation_node::override_active_url($url);
+$pageurl = new moodle_url($url);
+if ($returnurl) {
+    $pageurl->param('returnurl', $returnurl);
+}
+$PAGE->set_url($pageurl);
+
+if ($context->contextlevel == CONTEXT_USER and $USER->id != $context->instanceid) {
+    $PAGE->navbar->includesettingsbase = true;
+    $PAGE->navigation->extend_for_user($user);
+    $PAGE->set_context(context_course::instance($course->id));
+} else {
+    $PAGE->set_context($context);
+}
+
 $PAGE->set_context($context);
 
 $courseid = $course->id;
-$contextname = print_context_name($context);
+$contextname = $context->get_context_name();
 
 // Get the user_selector we will need.
-// Teachers within a course just get to see the same list of people they can
-// assign roles to. Admins (people with moodle/role:manage) can run this report for any user.
-$options = array('context' => $context, 'roleid' => 0);
-if (has_capability('moodle/role:manage', $context)) {
-    $userselector = new potential_assignees_course_and_above('reportuser', $options);
-} else {
-    $userselector = roles_get_potential_user_selector($context, 'reportuser', $options);
-}
-$userselector->set_multiselect(false);
-$userselector->set_rows(10);
+// Teachers within a course just get to see the same list of enrolled users.
+// Admins (people with moodle/role:manage) can run this report for any user.
+$options = array('accesscontext' => $context);
+$userselector = new core_role_check_users_selector('reportuser', $options);
+$userselector->set_rows(20);
 
 // Work out an appropriate page title.
-$title = get_string('checkpermissionsin', 'role', $contextname);
+$title = get_string('checkpermissionsin', 'core_role', $contextname);
 
 $PAGE->set_pagelayout('admin');
+if ($context->contextlevel == CONTEXT_BLOCK) {
+    // Do not show blocks when changing block's settings, it is confusing.
+    $PAGE->blocks->show_only_fake_blocks(true);
+}
 $PAGE->set_title($title);
 
 switch ($context->contextlevel) {
     case CONTEXT_SYSTEM:
+        require_once($CFG->libdir.'/adminlib.php');
         admin_externalpage_setup('checkpermissions', '', array('contextid' => $contextid));
         break;
     case CONTEXT_USER:
@@ -86,17 +99,17 @@ switch ($context->contextlevel) {
         $showroles = 1;
         break;
     case CONTEXT_COURSECAT:
-        $PAGE->set_heading("$SITE->fullname: ".get_string("categories"));
+        $PAGE->set_heading($SITE->fullname);
         break;
     case CONTEXT_COURSE:
         if ($isfrontpage) {
-            admin_externalpage_setup('frontpageroles', '', array('contextid' => $contextid), $CFG->wwwroot . '/' . $CFG->admin . '/roles/check.php');
+            $PAGE->set_heading(get_string('frontpage', 'admin'));
         } else {
             $PAGE->set_heading($course->fullname);
         }
         break;
     case CONTEXT_MODULE:
-        $PAGE->set_heading(print_context_name($context, false));
+        $PAGE->set_heading($context->get_context_name(false));
         $PAGE->set_cacheable(false);
         break;
     case CONTEXT_BLOCK:
@@ -122,7 +135,7 @@ if (!is_null($reportuser)) {
     echo $OUTPUT->box_start('generalbox boxaligncenter boxwidthwide');
 
     if (!empty($roleassignments)) {
-        echo $OUTPUT->heading(get_string('rolesforuser', 'role', fullname($reportuser)), 3);
+        echo $OUTPUT->heading(get_string('rolesforuser', 'core_role', fullname($reportuser)), 3);
         echo html_writer::start_tag('ul');
 
         $systemcontext = context_system::instance();
@@ -136,48 +149,45 @@ if (!is_null($reportuser)) {
                         array('action' => 'view', 'roleid' => $ra->roleid)), $rolename);
             }
 
-            echo html_writer::tag('li', get_string('roleincontext', 'role',
+            echo html_writer::tag('li', get_string('roleincontext', 'core_role',
                     array('role' => $rolename, 'context' => $link)));
         }
         echo html_writer::end_tag('ul');
     }
 
-    echo $OUTPUT->heading(get_string('permissionsforuser', 'role', fullname($reportuser)), 3);
-    $table = new check_capability_table($context, $reportuser, $contextname);
+    echo $OUTPUT->heading(get_string('permissionsforuser', 'core_role', fullname($reportuser)), 3);
+    $table = new core_role_check_capability_table($context, $reportuser, $contextname);
     $table->display();
     echo $OUTPUT->box_end();
 
-    $selectheading = get_string('selectanotheruser', 'role');
+    $selectheading = get_string('selectanotheruser', 'core_role');
 } else {
-    $selectheading = get_string('selectauser', 'role');
+    $selectheading = get_string('selectauser', 'core_role');
 }
 
 // Show UI for choosing a user to report on.
 echo $OUTPUT->box_start('generalbox boxwidthnormal boxaligncenter', 'chooseuser');
-echo '<form method="get" action="' . $CFG->wwwroot . '/' . $CFG->admin . '/roles/check.php" >';
-
-// Hidden fields.
-echo '<input type="hidden" name="contextid" value="' . $context->id . '" />';
-if (!empty($user->id)) {
-    echo '<input type="hidden" name="userid" value="' . $user->id . '" />';
-}
-if ($isfrontpage) {
-    echo '<input type="hidden" name="courseid" value="' . $courseid . '" />';
-}
+echo '<form method="post" action="' . $PAGE->url . '" >';
 
 // User selector.
 echo $OUTPUT->heading('<label for="reportuser">' . $selectheading . '</label>', 3);
 $userselector->display();
 
 // Submit button and the end of the form.
-echo '<p id="chooseusersubmit"><input type="submit" value="' . get_string('showthisuserspermissions', 'role') . '" /></p>';
+echo '<p id="chooseusersubmit"><input type="submit" value="' . get_string('showthisuserspermissions', 'core_role') . '" ' .
+     'class="btn btn-primary"/></p>';
 echo '</form>';
 echo $OUTPUT->box_end();
 
 // Appropriate back link.
 if ($context->contextlevel > CONTEXT_USER) {
     echo html_writer::start_tag('div', array('class'=>'backlink'));
-    echo html_writer::tag('a', get_string('backto', '', $contextname), array('href'=>get_context_url($context)));
+    if ($returnurl) {
+        $backurl = new moodle_url($returnurl);
+    } else {
+        $backurl = $context->get_url();
+    }
+    echo html_writer::link($backurl, get_string('backto', '', $contextname));
     echo html_writer::end_tag('div');
 }
 

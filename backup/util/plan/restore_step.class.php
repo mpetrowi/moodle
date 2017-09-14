@@ -45,6 +45,57 @@ abstract class restore_step extends base_step {
         }
         return $this->task->get_restoreid();
     }
+
+    /**
+     * Apply course startdate offset based in original course startdate and course_offset_startdate setting
+     * Note we are using one static cache here, but *by restoreid*, so it's ok for concurrence/multiple
+     * executions in the same request
+     *
+     * Note: The policy is to roll date only for configurations and not for user data. see MDL-9367.
+     *
+     * @param int $value Time value (seconds since epoch), or empty for nothing
+     * @return int Time value after applying the date offset, or empty for nothing
+     */
+    public function apply_date_offset($value) {
+
+        // Empties don't offset - zeros (int and string), false and nulls return original value.
+        if (empty($value)) {
+            return $value;
+        }
+
+        static $cache = array();
+        // Lookup cache.
+        if (isset($cache[$this->get_restoreid()])) {
+            return $value + $cache[$this->get_restoreid()];
+        }
+        // No cache, let's calculate the offset.
+        $original = $this->task->get_info()->original_course_startdate;
+        $setting = 0;
+        if ($this->setting_exists('course_startdate')) { // Seting may not exist (MDL-25019).
+            $settingobject = $this->task->get_setting('course_startdate');
+            if (method_exists($settingobject, 'get_normalized_value')) {
+                $setting = $settingobject->get_normalized_value();
+            } else {
+                $setting = $settingobject->get_value();
+            }
+        }
+
+        if (empty($original) || empty($setting)) {
+            // Original course has not startdate or setting doesn't exist, offset = 0.
+            $cache[$this->get_restoreid()] = 0;
+
+        } else if (abs($setting - $original) < 24 * 60 * 60) {
+            // Less than 24h of difference, offset = 0 (this avoids some problems with timezones).
+            $cache[$this->get_restoreid()] = 0;
+
+        } else {
+            // Arrived here, let's calculate the real offset.
+            $cache[$this->get_restoreid()] = $setting - $original;
+        }
+
+        // Return the passed value with cached offset applied.
+        return $value + $cache[$this->get_restoreid()];
+    }
 }
 
 /*

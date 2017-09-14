@@ -23,15 +23,18 @@
  */
 
 defined('MOODLE_INTERNAL') || die();
+
 function xmldb_enrol_database_upgrade($oldversion) {
-    global $CFG, $DB;
+    global $CFG;
 
-    $dbman = $DB->get_manager();
-
-
-    // Moodle v2.3.0 release upgrade line.
+    // Moodle v3.1.0 release upgrade line.
     // Put any upgrade step following this.
 
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
+
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }

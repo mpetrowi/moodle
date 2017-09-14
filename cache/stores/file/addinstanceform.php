@@ -27,7 +27,6 @@
  */
 
 require_once($CFG->dirroot.'/cache/forms.php');
-require_once($CFG->dirroot.'/cache/stores/file/lib.php');
 
 /**
  * Form for adding a file instance.
@@ -51,6 +50,10 @@ class cachestore_file_addinstance_form extends cachestore_addinstance_form {
         $form->setType('autocreate', PARAM_BOOL);
         $form->addHelpButton('autocreate', 'autocreate', 'cachestore_file');
         $form->disabledIf('autocreate', 'path', 'eq', '');
+
+        $form->addElement('checkbox', 'singledirectory', get_string('singledirectory', 'cachestore_file'));
+        $form->setType('singledirectory', PARAM_BOOL);
+        $form->addHelpButton('singledirectory', 'singledirectory', 'cachestore_file');
 
         $form->addElement('checkbox', 'prescan', get_string('prescan', 'cachestore_file'));
         $form->setType('prescan', PARAM_BOOL);

@@ -30,14 +30,13 @@
 //
 // BasicLTI4Moodle is copyright 2009 by Marc Alier Forment, Jordi Piguillem and Nikolas Galanis
 // of the Universitat Politecnica de Catalunya http://www.upc.edu
-// Contact info: Marc Alier Forment granludo @ gmail.com or marc.alier @ upc.edu
+// Contact info: Marc Alier Forment granludo @ gmail.com or marc.alier @ upc.edu.
 
 /**
  * This file contains all the restore steps that will be used
  * by the restore_lti_activity_task
  *
- * @package    mod
- * @subpackage lti
+ * @package mod_lti
  * @copyright  2009 Marc Alier, Jordi Piguillem, Nikolas Galanis
  *  marc.alier@upc.edu
  * @copyright  2009 Universitat Politecnica de Catalunya http://www.upc.edu
@@ -57,34 +56,45 @@ class restore_lti_activity_structure_step extends restore_activity_structure_ste
     protected function define_structure() {
 
         $paths = array();
-        $paths[] = new restore_path_element('lti', '/activity/lti');
+        $lti = new restore_path_element('lti', '/activity/lti');
+        $paths[] = $lti;
 
-        // Return the paths wrapped into standard activity structure
+        // Add support for subplugin structures.
+        $this->add_subplugin_structure('ltisource', $lti);
+        $this->add_subplugin_structure('ltiservice', $lti);
+
+        // Return the paths wrapped into standard activity structure.
         return $this->prepare_activity_structure($paths);
     }
 
     protected function process_lti($data) {
-        global $DB, $CFG;
+        global $DB;
 
         $data = (object)$data;
         $oldid = $data->id;
         $data->course = $this->get_courseid();
+        $data->servicesalt = uniqid('', true);
 
-        require_once($CFG->dirroot.'/mod/lti/lib.php');
+        // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+        // See MDL-9367.
+
+         // Grade used to be a float (whole numbers only), restore as int.
+        $data->grade = (int) $data->grade;
+
         // Clean any course or site typeid. All modules
         // are restored as self-contained. Note this is
         // an interim solution until the issue below is implemented.
         // TODO: MDL-34161 - Fix restore to support course/site tools & submissions.
         $data->typeid = 0;
 
-        $newitemid = lti_add_instance($data, null);
+        $newitemid = $DB->insert_record('lti', $data);
 
-        // immediately after inserting "activity" record, call this
+        // Immediately after inserting "activity" record, call this.
         $this->apply_activity_instance($newitemid);
     }
 
     protected function after_execute() {
-        // Add lti related files, no need to match by itemname (just internally handled context)
+        // Add lti related files, no need to match by itemname (just internally handled context).
         $this->add_related_files('mod_lti', 'intro', null);
     }
 }

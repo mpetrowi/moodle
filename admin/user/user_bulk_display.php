@@ -24,8 +24,9 @@ echo $OUTPUT->header();
 
 $countries = get_string_manager()->get_list_of_countries(true);
 
+$namefields = get_all_user_name_fields(true);
 foreach ($users as $key => $id) {
-    $user = $DB->get_record('user', array('id'=>$id), 'id, firstname, lastname, username, email, country, lastaccess, city');
+    $user = $DB->get_record('user', array('id'=>$id), 'id, ' . $namefields . ', username, email, country, lastaccess, city');
     $user->fullname = fullname($user, true);
     $user->country = @$countries[$user->country];
     unset($user->firstname);
@@ -56,7 +57,12 @@ foreach ($columns as $column) {
         $columndir = 'asc';
     } else {
         $columndir = $dir == 'asc' ? 'desc' : 'asc';
-        $columnicon = ' <img src="'.$OUTPUT->pix_url('t/'.($dir == 'asc' ? 'down' : 'up' )).'f" alt="" />';
+        $icon = 't/down';
+        $iconstr = $columndir;
+        if ($dir != 'asc') {
+            $icon = 't/up';
+        }
+        $columnicon = ' ' . $OUTPUT->pix_icon($icon, get_string($iconstr));
     }
     $table->head[] = '<a href="user_bulk_display.php?sort='.$column.'&amp;dir='.$columndir.'">'.$strtitle.'</a>'.$columnicon;
     $table->align[] = 'left';

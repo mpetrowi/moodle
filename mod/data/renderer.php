@@ -3,7 +3,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 class mod_data_renderer extends plugin_renderer_base {
-    
+
     public function import_setting_mappings($datamodule, data_preset_importer $importer) {
 
         $strblank = get_string('blank', 'data');
@@ -24,7 +24,7 @@ class mod_data_renderer extends plugin_renderer_base {
         $html .= html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'action', 'value'=>'finishimport'));
         $html .= html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'sesskey', 'value'=>sesskey()));
         $html .= html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'d', 'value'=>$datamodule->id));
-        
+
         if ($importer instanceof data_preset_existing_importer) {
             $html .= html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'fullname', 'value'=>$importer->get_userid().'/'.$importer->get_directory()));
         } else {
@@ -32,7 +32,7 @@ class mod_data_renderer extends plugin_renderer_base {
         }
 
         if (!empty($newfields)) {
-            $html .= $this->output->heading_with_help($strfieldmappings, 'fieldmappings', 'data');
+            $html .= $this->output->heading_with_help($strfieldmappings, 'fieldmappings', 'data', '', '', 3);
 
             $table = new html_table();
             $table->data = array();
@@ -40,7 +40,8 @@ class mod_data_renderer extends plugin_renderer_base {
             foreach ($newfields as $nid => $newfield) {
                 $row = array();
                 $row[0] = html_writer::tag('label', $newfield->name, array('for'=>'id_'.$newfield->name));
-                $row[1] = html_writer::start_tag('select', array('name'=>'field_'.$nid, 'id'=>'id_'.$newfield->name));
+                $attrs = array('name' => 'field_' . $nid, 'id' => 'id_' . $newfield->name, 'class' => 'custom-select');
+                $row[1] = html_writer::start_tag('select', $attrs);
 
                 $selected = false;
                 foreach ($currentfields as $cid => $currentfield) {
@@ -60,7 +61,7 @@ class mod_data_renderer extends plugin_renderer_base {
                 } else {
                     $row[1] .= html_writer::tag('option', get_string('mapnewfield', 'data'), array('value'=>'-1', 'selected'=>'selected'));
                 }
-                
+
                 $row[1] .= html_writer::end_tag('select');
                 $table->data[] = $row;
             }
@@ -71,10 +72,11 @@ class mod_data_renderer extends plugin_renderer_base {
         }
 
         $html .= html_writer::start_tag('div', array('class'=>'overwritesettings'));
-        $html .= html_writer::tag('label', get_string('overwritesettings', 'data'), array('for'=>'overwritesettings'));
-        $html .= html_writer::empty_tag('input', array('type'=>'checkbox', 'name'=>'overwritesettings', 'id'=>'overwritesettings'));
+        $html .= html_writer::tag('label', get_string('overwritesettings', 'data'), array('for' => 'overwritesettings'));
+        $attrs = array('type' => 'checkbox', 'name' => 'overwritesettings', 'id' => 'overwritesettings', 'class' => 'm-l-1');
+        $html .= html_writer::empty_tag('input', $attrs);
         $html .= html_writer::end_tag('div');
-        $html .= html_writer::empty_tag('input', array('type'=>'submit', 'class'=>'button', 'value'=>$strcontinue));
+        $html .= html_writer::empty_tag('input', array('type' => 'submit', 'class' => 'btn btn-primary', 'value' => $strcontinue));
 
         $html .= html_writer::end_tag('div');
         $html .= html_writer::end_tag('form');
@@ -82,5 +84,5 @@ class mod_data_renderer extends plugin_renderer_base {
 
         return $html;
     }
-    
+
 }

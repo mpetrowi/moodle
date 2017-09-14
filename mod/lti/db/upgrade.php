@@ -30,13 +30,12 @@
 //
 // BasicLTI4Moodle is copyright 2009 by Marc Alier Forment, Jordi Piguillem and Nikolas Galanis
 // of the Universitat Politecnica de Catalunya http://www.upc.edu
-// Contact info: Marc Alier Forment granludo @ gmail.com or marc.alier @ upc.edu
+// Contact info: Marc Alier Forment granludo @ gmail.com or marc.alier @ upc.edu.
 
 /**
  * This file keeps track of upgrades to the lti module
  *
- * @package    mod
- * @subpackage lti
+ * @package mod_lti
  * @copyright  2009 Marc Alier, Jordi Piguillem, Nikolas Galanis
  *  marc.alier@upc.edu
  * @copyright  2009 Universitat Politecnica de Catalunya http://www.upc.edu
@@ -64,14 +63,42 @@ function xmldb_lti_upgrade($oldversion) {
 
     $dbman = $DB->get_manager();
 
+    if ($oldversion < 2016041800) {
 
-    // Moodle v2.2.0 release upgrade line
-    // Put any upgrade step following this
+        // Define field description to be added to lti_types.
+        $table = new xmldb_table('lti_types');
+        $field = new xmldb_field('description', XMLDB_TYPE_TEXT, null, null, null, null, null, 'timemodified');
 
-    // Moodle v2.3.0 release upgrade line
-    // Put any upgrade step following this
+        // Conditionally launch add field description.
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
 
+        // Lti savepoint reached.
+        upgrade_mod_savepoint(true, 2016041800, 'lti');
+    }
+
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
+
+    if ($oldversion < 2016052301) {
+
+        // Changing type of field value on table lti_types_config to text.
+        $table = new xmldb_table('lti_types_config');
+        $field = new xmldb_field('value', XMLDB_TYPE_TEXT, null, null, XMLDB_NOTNULL, null, null, 'name');
+
+        // Launch change of type for field value.
+        $dbman->change_field_type($table, $field);
+
+        // Lti savepoint reached.
+        upgrade_mod_savepoint(true, 2016052301, 'lti');
+    }
+
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
+
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }
-

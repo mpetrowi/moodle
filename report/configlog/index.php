@@ -23,7 +23,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require(dirname(__FILE__).'/../../config.php');
+require(__DIR__.'/../../config.php');
 require_once($CFG->libdir.'/adminlib.php');
 
 // page parameters
@@ -69,7 +69,7 @@ foreach ($columns as $column=>$strcolumn) {
         } else {
             $columnicon = $dir == 'ASC' ? 'down':'up';
         }
-        $columnicon = " <img src=\"" . $OUTPUT->pix_url('t/' . $columnicon) . "\" alt=\"\" />";
+        $columnicon = $OUTPUT->pix_icon('t/' . $columnicon, '');
 
     }
     $hcolumns[$column] = "<a href=\"index.php?sort=$column&amp;dir=$columndir&amp;page=$page&amp;perpage=$perpage\">".$strcolumn."</a>$columnicon";
@@ -92,13 +92,16 @@ if (($CFG->fullnamedisplay == 'firstname lastname') or
 
 $table = new html_table();
 $table->head  = array($hcolumns['timemodified'], $fullnamedisplay, $hcolumns['plugin'], $hcolumns['name'], $hcolumns['value'], $hcolumns['oldvalue']);
-$table->align = array('left',                    'left',           'left',              'left',            'left',             'left');
-$table->size  = array('30%',                     '10%',            '10%',               '10%',             '20%',              '20%');
-$table->width = '95%';
+$table->colclasses = array('leftalign date', 'leftalign name', 'leftalign plugin', 'leftalign setting', 'leftalign newvalue', 'leftalign originalvalue');
+$table->id = 'configchanges';
+$table->attributes['class'] = 'admintable generaltable';
 $table->data  = array();
 
 if ($sort == 'firstname' or $sort == 'lastname') {
     $orderby = "u.$sort $dir";
+} else if ($sort == 'value' or $sort == 'oldvalue') {
+    // cross-db text-compatible sorting.
+    $orderby = $DB->sql_order_by_text("cl.$sort", 255) . ' ' . $dir;
 } else {
     $orderby = "cl.$sort $dir";
 }

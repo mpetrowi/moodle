@@ -45,7 +45,7 @@ if ($userid !== 0) {
 $PAGE->set_url($url);
 
 if (!$course = $DB->get_record('course', array('id' => $courseid))) {
-    print_error('nocourseid');
+    print_error('invalidcourseid');
 }
 
 $PAGE->set_pagelayout('incourse');
@@ -57,7 +57,7 @@ if (!has_capability('moodle/grade:manage', $context)) {
 
 // default return url
 $gpr = new grade_plugin_return();
-$returnurl = $gpr->get_return_url($CFG->wwwroot.'/grade/report.php?id='.$course->id);
+$returnurl = $gpr->get_return_url($CFG->wwwroot.'/grade/report/index.php?id='.$course->id);
 
 // security checks!
 if (!empty($id)) {
@@ -107,21 +107,17 @@ $mform = new edit_grade_form(null, array('grade_item'=>$grade_item, 'gpr'=>$gpr)
 if ($grade = $DB->get_record('grade_grades', array('itemid' => $grade_item->id, 'userid' => $userid))) {
 
     // always clean existing feedback - grading should not have XSS risk
-    if (can_use_html_editor()) {
-        if (empty($grade->feedback)) {
-            $grade->feedback  = '';
-        } else {
-            $options = new stdClass();
-            $options->smiley  = false;
-            $options->filter  = false;
-            $options->noclean = false;
-            $options->para    = false;
-            $grade->feedback  = format_text($grade->feedback, $grade->feedbackformat, $options);
-        }
-        $grade->feedbackformat = FORMAT_HTML;
+    if (empty($grade->feedback)) {
+        $grade->feedback  = '';
     } else {
-        $grade->feedback       = clean_text($grade->feedback, $grade->feedbackformat);
+        $options = new stdClass();
+        $options->smiley  = false;
+        $options->filter  = false;
+        $options->noclean = false;
+        $options->para    = false;
+        $grade->feedback  = format_text($grade->feedback, $grade->feedbackformat, $options);
     }
+    $grade->feedbackformat = FORMAT_HTML;
 
     $grade->locked      = $grade->locked     > 0 ? 1:0;
     $grade->overridden  = $grade->overridden > 0 ? 1:0;
@@ -200,6 +196,7 @@ if ($mform->is_cancelled()) {
         $data->feedback       = $old_grade_grade->feedback;
         $data->feedbackformat = $old_grade_grade->feedbackformat;
     }
+
     // update final grade or feedback
     // when we set override grade the first time, it happens here
     $grade_item->update_final_grade($data->userid, $data->finalgrade, 'editgrade', $data->feedback, $data->feedbackformat);

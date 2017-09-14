@@ -10,6 +10,11 @@ $return = optional_param('return', '', PARAM_ALPHA);
 
 /// no guest autologin
 require_login(0, false);
+if (isguestuser()) {
+    // Login as real user!
+    $SESSION->wantsurl = (string)new moodle_url('/admin/upgradesettings.php', array('return'=>$return));
+    redirect(get_login_url());
+}
 
 admin_externalpage_setup('upgradesettings'); // now hidden page
 $PAGE->set_pagelayout('maintenance'); // do not print any blocks or other rubbish, we want to force saving
@@ -19,7 +24,6 @@ $adminroot = admin_get_root(); // need all settings
 // now we'll deal with the case that the admin has submitted the form with new settings
 if ($data = data_submitted() and confirm_sesskey()) {
     $count = admin_write_settings($data);
-    $adminroot = admin_get_root(true); //reload tree
 }
 
 $newsettings = admin_output_new_settings_by_page($adminroot);
@@ -63,7 +67,7 @@ echo '<fieldset>';
 echo '<div class="clearer"><!-- --></div>';
 echo $newsettingshtml;
 echo '</fieldset>';
-echo '<div class="form-buttons"><input class="form-submit" type="submit" value="'.get_string('savechanges','admin').'" /></div>';
+echo '<div class="form-buttons"><input class="form-submit btn btn-primary" type="submit" value="'.get_string('savechanges','admin').'" /></div>';
 echo '</div>';
 echo '</form>';
 

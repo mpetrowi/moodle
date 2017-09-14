@@ -33,7 +33,7 @@ $PAGE->set_url('/grade/edit/tree/action.php', array('id'=>$courseid, 'action'=>$
 
 /// Make sure they can even access this course
 if (!$course = $DB->get_record('course', array('id' => $courseid))) {
-    print_error('nocourseid');
+    print_error('invalidcourseid');
 }
 require_login($course);
 $context = context_course::instance($course->id);
@@ -62,6 +62,9 @@ switch ($action) {
             if ($type == 'grade' and empty($object->id)) {
                 $object->insert();
             }
+            if (!$object->can_control_visibility()) {
+                print_error('componentcontrolsvisibility', 'grades', $returnurl);
+            }
             $object->set_hidden(1, true);
         }
         break;
@@ -73,6 +76,9 @@ switch ($action) {
             }
             if ($type == 'grade' and empty($object->id)) {
                 $object->insert();
+            }
+            if (!$object->can_control_visibility()) {
+                print_error('componentcontrolsvisibility', 'grades', $returnurl);
             }
             $object->set_hidden(0, true);
         }
@@ -101,6 +107,37 @@ switch ($action) {
             $object->set_locked(0, true, true);
         }
         break;
+
+    case 'resetweights':
+        if ($eid && confirm_sesskey()) {
+
+            // This is specific to category items with natural weight as an aggregation method, and can
+            // only be done by someone who can manage the grades.
+            if ($type != 'category' || $object->aggregation != GRADE_AGGREGATE_SUM ||
+                    !has_capability('moodle/grade:manage', $context)) {
+                print_error('nopermissiontoresetweights', 'grades', $returnurl);
+            }
+
+            // Remove the weightoverride flag from the children.
+            $children = $object->get_children();
+            foreach ($children as $item) {
+                if ($item['type'] == 'category') {
+                    $gradeitem = $item['object']->load_grade_item();
+                } else {
+                    $gradeitem = $item['object'];
+                }
+
+                if ($gradeitem->weightoverride == false) {
+                    continue;
+                }
+
+                $gradeitem->weightoverride = false;
+                $gradeitem->update();
+            }
+
+            // Force regrading.
+            $object->force_regrading();
+        }
 }
 
 redirect($returnurl);

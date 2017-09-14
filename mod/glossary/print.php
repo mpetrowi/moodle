@@ -8,6 +8,7 @@ require_once("lib.php");
 $id            = required_param('id', PARAM_INT);                     // Course Module ID
 $sortorder     = optional_param('sortorder', 'asc', PARAM_ALPHA);     // Sorting order
 $offset        = optional_param('offset', 0, PARAM_INT);              // number of entries to bypass
+$pagelimit     = optional_param('pagelimit', 0, PARAM_INT);           // Number of entries per page, 0 if unlimited.
 $displayformat = optional_param('displayformat',-1, PARAM_INT);
 
 $mode    = required_param('mode', PARAM_ALPHA);             // mode to show the entries
@@ -47,8 +48,8 @@ if (! $glossary = $DB->get_record("glossary", array("id"=>$cm->instance))) {
     print_error('invalidid', 'glossary');
 }
 
-if ( !$entriesbypage = $glossary->entbypage ) {
-    $entriesbypage = $CFG->glossary_entbypage;
+if ($pagelimit < 0) {
+    $pagelimit = 0;
 }
 
 require_course_login($course, true, $cm);
@@ -166,37 +167,50 @@ $entriesshown = 0;
 $currentpivot = '';
 
 $site = $DB->get_record("course", array("id"=>1));
-echo '<p style="text-align:right"><span style="font-size:0.75em">' . userdate(time()) . '</span></p>';
-echo get_string("site") . ': <strong>' . format_string($site->fullname) . '</strong><br />';
-echo get_string("course") . ': <strong>' . format_string($course->fullname) . ' ('. format_string($course->shortname) . ')</strong><br />';
-echo get_string("modulename","glossary") . ': <strong>' . format_string($glossary->name, true) . '</strong>';
+
+// Print dialog link.
+$printtext = get_string('print', 'glossary');
+$printlinkatt = array('onclick' => 'window.print();return false;', 'class' => 'glossary_no_print printicon');
+$printiconlink = html_writer::link('#', $printtext, $printlinkatt);
+echo  html_writer::tag('div', $printiconlink, array('class' => 'displayprinticon'));
+
+echo html_writer::tag('div', userdate(time()), array('class' => 'displaydate'));
+
+$sitename = get_string("site") . ': <span class="strong">' . format_string($site->fullname) . '</span>';
+echo html_writer::tag('div', $sitename, array('class' => 'sitename'));
+
+$coursename = get_string("course") . ': <span class="strong">' . format_string($course->fullname) . ' ('. format_string($course->shortname) . ')</span>';
+echo html_writer::tag('div', $coursename, array('class' => 'coursename'));
+
+$modname = get_string("modulename","glossary") . ': <span class="strong">' . format_string($glossary->name, true) . '</span>';
+echo html_writer::tag('div', $modname, array('class' => 'modname'));
+
 if ( $allentries ) {
     foreach ($allentries as $entry) {
 
-        // Setting the pivot for the current entry
-        $pivot = $entry->glossarypivot;
-        $upperpivot = textlib::strtoupper($pivot);
-        $pivottoshow = textlib::strtoupper(format_string($pivot, true, $fmtoptions));
-        // Reduce pivot to 1cc if necessary
-        if ( !$fullpivot ) {
-            $upperpivot = textlib::substr($upperpivot, 0, 1);
-            $pivottoshow = textlib::substr($pivottoshow, 0, 1);
-        }
+        // Setting the pivot for the current entry.
+        if ($printpivot) {
 
-        // If there's  group break
-        if ( $currentpivot != $upperpivot ) {
+            $pivot = $entry->{$pivotkey};
+            $upperpivot = core_text::strtoupper($pivot);
+            $pivottoshow = core_text::strtoupper(format_string($pivot, true, $fmtoptions));
 
-            // print the group break if apply
-            if ( $printpivot )  {
+            // Reduce pivot to 1cc if necessary.
+            if (!$fullpivot) {
+                $upperpivot = core_text::substr($upperpivot, 0, 1);
+                $pivottoshow = core_text::substr($pivottoshow, 0, 1);
+            }
+
+            // If there's a group break.
+            if ($currentpivot != $upperpivot) {
                 $currentpivot = $upperpivot;
 
-                if ( isset($entry->userispivot) ) {
-                    // printing the user icon if defined (only when browsing authors)
-                    $user = $DB->get_record("user", array("id"=>$entry->userid));
+                if ($userispivot) {
+                    // Printing the user icon if defined (only when browsing authors).
+                    $user = mod_glossary_entry_query_builder::get_user_from_record($entry);
                     $pivottoshow = fullname($user);
                 }
-
-                echo "<p class='mdl-align'><strong>".clean_text($pivottoshow)."</strong></p>" ;
+                echo html_writer::tag('div', clean_text($pivottoshow), array('class' => 'mdl-align strong'));
             }
         }
 

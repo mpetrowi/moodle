@@ -38,16 +38,12 @@ function glossary_show_entry_encyclopedia($course, $cm, $glossary, $entry, $mode
         echo '<td class="left side" rowspan="2">&nbsp;</td>';
         echo '<td colspan="2" class="entry">';
 
-        if ($entry->attachment) {
-            $entry->course = $course->id;
-            if (strlen($entry->definition)%2) {
-                $align = 'right';
-            } else {
-                $align = 'left';
-            }
-            glossary_print_entry_attachment($entry, $cm, null,$align,false);
-        }
         glossary_print_entry_definition($entry, $glossary, $cm);
+        glossary_print_entry_attachment($entry, $cm, null);
+        if (core_tag_tag::is_enabled('mod_glossary', 'glossary_entries')) {
+            echo $OUTPUT->tag_list(
+                core_tag_tag::get_item_tags('mod_glossary', 'glossary_entries', $entry->id), null, 'glossary-tags');
+        }
 
         if ($printicons or $aliases) {
             echo '</td></tr>';

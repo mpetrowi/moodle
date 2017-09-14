@@ -5,7 +5,9 @@
  *
  * Helps an admin to clean up spam in Moodle
  *
- * @authors Dongsheng Cai, Martin Dougiamas, Amr Hourani
+ * @author Dongsheng Cai
+ * @author Martin Dougiamas
+ * @author Amr Hourani
  * @license http://www.gnu.org/copyleft/gpl.html GNU Public License
  */
 
@@ -73,7 +75,7 @@ if (!empty($delall) && confirm_sesskey()) {
     exit;
 }
 
-if (!empty($ignore)) {
+if (!empty($ignore) && confirm_sesskey()) {
     unset($SESSION->users_result[$id]);
     echo json_encode(true);
     exit;
@@ -94,12 +96,12 @@ echo $OUTPUT->box_start();     // The forms section at the top
 
 <div class="mdl-align">
 
-<form method="post" action="index.php">
+<form method="post" action="index.php" class="form-inline spamcleanerform">
   <div>
     <label class="accesshide" for="keyword_el"><?php print_string('spamkeyword', 'tool_spamcleaner') ?></label>
-    <input type="text" name="keyword" id="keyword_el" value="<?php p($keyword) ?>" />
+    <input type="text" class="form-control" name="keyword" id="keyword_el" value="<?php p($keyword) ?>" />
     <input type="hidden" name="sesskey" value="<?php echo sesskey();?>" />
-    <input type="submit" value="<?php echo get_string('spamsearch', 'tool_spamcleaner')?>" />
+    <input type="submit" class="btn btn-primary" value="<?php echo get_string('spamsearch', 'tool_spamcleaner')?>" />
   </div>
 </form>
 <p><?php echo get_string('spameg', 'tool_spamcleaner');?></p>
@@ -108,7 +110,8 @@ echo $OUTPUT->box_start();     // The forms section at the top
 
 <form method="post"  action="index.php">
   <div>
-    <input type="submit" name="autodetect" value="<?php echo get_string('spamauto', 'tool_spamcleaner');?>" />
+    <input type="submit" class="btn btn-primary" name="autodetect"
+           value="<?php echo get_string('spamauto', 'tool_spamcleaner');?>" />
   </div>
 </form>
 
@@ -178,13 +181,47 @@ function search_spammers($keywords) {
     $conditions6 = '( '.implode(' OR ', $keywordfull6).' )';
     $conditions7 = '( '.implode(' OR ', $keywordfull7).' )';
 
-    $sql  = "SELECT * FROM {user} WHERE deleted = 0 AND id <> :userid AND $conditions";  // Exclude oneself
-    $sql2 = "SELECT u.*, p.summary FROM {user} AS u, {post} AS p WHERE $conditions2 AND u.deleted = 0 AND u.id=p.userid AND u.id <> :userid";
-    $sql3 = "SELECT u.*, p.subject as postsubject FROM {user} AS u, {post} AS p WHERE $conditions3 AND u.deleted = 0 AND u.id=p.userid AND u.id <> :userid";
-    $sql4 = "SELECT u.*, c.content FROM {user} AS u, {comments} AS c WHERE $conditions4 AND u.deleted = 0 AND u.id=c.userid AND u.id <> :userid";
-    $sql5 = "SELECT u.*, m.fullmessage FROM {user} AS u, {message} AS m WHERE $conditions5 AND u.deleted = 0 AND u.id=m.useridfrom AND u.id <> :userid";
-    $sql6 = "SELECT u.*, fp.message FROM {user} AS u, {forum_posts} AS fp WHERE $conditions6 AND u.deleted = 0 AND u.id=fp.userid AND u.id <> :userid";
-    $sql7 = "SELECT u.*, fp.subject FROM {user} AS u, {forum_posts} AS fp WHERE $conditions7 AND u.deleted = 0 AND u.id=fp.userid AND u.id <> :userid";
+    $sql  = "SELECT *
+               FROM {user}
+              WHERE deleted = 0
+                    AND id <> :userid
+                    AND $conditions";  // Exclude oneself
+    $sql2 = "SELECT u.*, p.summary
+               FROM {user} u, {post} p
+              WHERE $conditions2
+                    AND u.deleted = 0
+                    AND u.id=p.userid
+                    AND u.id <> :userid";
+    $sql3 = "SELECT u.*, p.subject AS postsubject
+               FROM {user} u, {post} p
+              WHERE $conditions3
+                    AND u.deleted = 0
+                    AND u.id=p.userid
+                    AND u.id <> :userid";
+    $sql4 = "SELECT u.*, c.content
+               FROM {user} u, {comments} c
+               WHERE $conditions4
+                    AND u.deleted = 0
+                    AND u.id=c.userid
+                    AND u.id <> :userid";
+    $sql5 = "SELECT u.*, m.fullmessage
+               FROM {user} u, {message} m
+              WHERE $conditions5
+                    AND u.deleted = 0
+                    AND u.id=m.useridfrom
+                    AND u.id <> :userid";
+    $sql6 = "SELECT u.*, fp.message
+               FROM {user} u, {forum_posts} fp
+              WHERE $conditions6
+                    AND u.deleted = 0
+                    AND u.id=fp.userid
+                    AND u.id <> :userid";
+    $sql7 = "SELECT u.*, fp.subject
+               FROM {user} u, {forum_posts} fp
+              WHERE $conditions7
+                    AND u.deleted = 0
+                    AND u.id=fp.userid
+                    AND u.id <> :userid";
 
     $spamusers_desc = $DB->get_recordset_sql($sql, $params);
     $spamusers_blog = $DB->get_recordset_sql($sql2, $params);
@@ -220,7 +257,9 @@ function print_user_list($users_rs, $keywords) {
     foreach ($users_rs as $rs){
         foreach ($rs as $user) {
             if (!$count) {
-                echo '<table border="1" width="100%" id="data-grid"><tr><th>&nbsp;</th><th>'.get_string('user','admin').'</th><th>'.get_string('spamdesc', 'tool_spamcleaner').'</th><th>'.get_string('spamoperation', 'tool_spamcleaner').'</th></tr>';
+                echo '<table class="table table-bordered" border="1" width="100%" id="data-grid"><tr><th>&nbsp;</th>
+                    <th>'.get_string('user', 'admin').'</th><th>'.get_string('spamdesc', 'tool_spamcleaner').'</th>
+                    <th>'.get_string('spamoperation', 'tool_spamcleaner').'</th></tr>';
             }
             $count++;
             filter_user($user, $keywords, $count);
@@ -233,7 +272,7 @@ function print_user_list($users_rs, $keywords) {
     } else {
         echo '</table>';
         echo '<div class="mld-align">
-              <button id="removeall_btn">'.get_string('spamdeleteall', 'tool_spamcleaner').'</button>
+              <button id="removeall_btn" class="btn btn-secondary">'.get_string('spamdeleteall', 'tool_spamcleaner').'</button>
               </div>';
     }
 }
@@ -321,8 +360,10 @@ function print_user_entry($user, $keywords, $count) {
 
         $html .= '<td align="left">'.format_text($user->description, $user->descriptionformat, array('overflowdiv'=>true)).'</td>';
         $html .= '<td width="100px" align="center">';
-        $html .= '<button onclick="M.tool_spamcleaner.del_user(this,'.$user->id.')">'.get_string('deleteuser', 'admin').'</button><br />';
-        $html .= '<button onclick="M.tool_spamcleaner.ignore_user(this,'.$user->id.')">'.get_string('ignore', 'admin').'</button>';
+        $html .= '<button class="btn btn-primary" onclick="M.tool_spamcleaner.del_user(this,'.$user->id.')">'.
+            get_string('deleteuser', 'admin').'</button><br />';
+        $html .= '<button class="btn btn-secondary" onclick="M.tool_spamcleaner.ignore_user(this,'.$user->id.')">'.
+            get_string('ignore', 'admin').'</button>';
         $html .= '</td>';
         $html .= '</tr>';
         return $html;

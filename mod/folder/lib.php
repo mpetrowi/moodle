@@ -18,13 +18,17 @@
 /**
  * Mandatory public API of folder module
  *
- * @package    mod
- * @subpackage folder
- * @copyright  2009 Petr Skoda  {@link http://skodak.org}
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @package   mod_folder
+ * @copyright 2009 Petr Skoda  {@link http://skodak.org}
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
+
+/** Display folder contents on a separate page */
+define('FOLDER_DISPLAY_PAGE', 0);
+/** Display folder contents inline in a course */
+define('FOLDER_DISPLAY_INLINE', 1);
 
 /**
  * List of features supported in Folder module
@@ -36,7 +40,6 @@ function folder_supports($feature) {
         case FEATURE_MOD_ARCHETYPE:           return MOD_ARCHETYPE_RESOURCE;
         case FEATURE_GROUPS:                  return false;
         case FEATURE_GROUPINGS:               return false;
-        case FEATURE_GROUPMEMBERSONLY:        return true;
         case FEATURE_MOD_INTRO:               return true;
         case FEATURE_COMPLETION_TRACKS_VIEWS: return true;
         case FEATURE_GRADE_HAS_GRADE:         return false;
@@ -62,11 +65,21 @@ function folder_get_extra_capabilities() {
  * @return array status array
  */
 function folder_reset_userdata($data) {
+
+    // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+    // See MDL-9367.
+
     return array();
 }
 
 /**
- * List of view style log actions
+ * List the actions that correspond to a view of this module.
+ * This is used by the participation report.
+ *
+ * Note: This is not used by new logging system. Event with
+ *       crud = 'r' and edulevel = LEVEL_PARTICIPATING will
+ *       be considered as view action.
+ *
  * @return array
  */
 function folder_get_view_actions() {
@@ -74,7 +87,13 @@ function folder_get_view_actions() {
 }
 
 /**
- * List of update style log actions
+ * List the actions that correspond to a post of this module.
+ * This is used by the participation report.
+ *
+ * Note: This is not used by new logging system. Event with
+ *       crud = ('c' || 'u' || 'd') and edulevel = LEVEL_PARTICIPATING
+ *       will be considered as post action.
+ *
  * @return array
  */
 function folder_get_post_actions() {
@@ -104,6 +123,9 @@ function folder_add_instance($data, $mform) {
         file_save_draft_area_files($draftitemid, $context->id, 'mod_folder', 'content', 0, array('subdirs'=>true));
     }
 
+    $completiontimeexpected = !empty($data->completionexpected) ? $data->completionexpected : null;
+    \core_completion\api::update_completion_date_event($data->coursemodule, 'folder', $data->id, $completiontimeexpected);
+
     return $data->id;
 }
 
@@ -130,6 +152,9 @@ function folder_update_instance($data, $mform) {
         file_save_draft_area_files($draftitemid, $context->id, 'mod_folder', 'content', 0, array('subdirs'=>true));
     }
 
+    $completiontimeexpected = !empty($data->completionexpected) ? $data->completionexpected : null;
+    \core_completion\api::update_completion_date_event($data->coursemodule, 'folder', $data->id, $completiontimeexpected);
+
     return true;
 }
 
@@ -145,62 +170,14 @@ function folder_delete_instance($id) {
         return false;
     }
 
+    $cm = get_coursemodule_from_instance('folder', $id);
+    \core_completion\api::update_completion_date_event($cm->id, 'folder', $folder->id, null);
+
     // note: all context files are deleted automatically
 
     $DB->delete_records('folder', array('id'=>$folder->id));
 
     return true;
-}
-
-/**
- * Return use outline
- * @param object $course
- * @param object $user
- * @param object $mod
- * @param object $folder
- * @return object|null
- */
-function folder_user_outline($course, $user, $mod, $folder) {
-    global $DB;
-
-    if ($logs = $DB->get_records('log', array('userid'=>$user->id, 'module'=>'folder',
-                                              'action'=>'view', 'info'=>$folder->id), 'time ASC')) {
-
-        $numviews = count($logs);
-        $lastlog = array_pop($logs);
-
-        $result = new stdClass();
-        $result->info = get_string('numviews', '', $numviews);
-        $result->time = $lastlog->time;
-
-        return $result;
-    }
-    return NULL;
-}
-
-/**
- * Return use complete
- * @param object $course
- * @param object $user
- * @param object $mod
- * @param object $folder
- */
-function folder_user_complete($course, $user, $mod, $folder) {
-    global $CFG, $DB;
-
-    if ($logs = $DB->get_records('log', array('userid'=>$user->id, 'module'=>'folder',
-                                              'action'=>'view', 'info'=>$folder->id), 'time ASC')) {
-        $numviews = count($logs);
-        $lastlog = array_pop($logs);
-
-        $strmostrecently = get_string('mostrecently');
-        $strnumviews = get_string('numviews', '', $numviews);
-
-        echo "$strnumviews - $strmostrecently ".userdate($lastlog->time);
-
-    } else {
-        print_string('neverseen', 'folder');
-    }
 }
 
 /**
@@ -312,7 +289,7 @@ function folder_pluginfile($course, $cm, $context, $filearea, $args, $forcedownl
 
     // finally send the file
     // for folder module, we force download file all the time
-    send_stored_file($file, 86400, 0, true, $options);
+    send_stored_file($file, 0, 0, true, $options);
 }
 
 /**
@@ -353,6 +330,11 @@ function folder_export_contents($cm, $baseurl) {
         $file['userid']       = $fileinfo->get_userid();
         $file['author']       = $fileinfo->get_author();
         $file['license']      = $fileinfo->get_license();
+        $file['mimetype']     = $fileinfo->get_mimetype();
+        $file['isexternalfile'] = $fileinfo->is_external_file();
+        if ($file['isexternalfile']) {
+            $file['repositorytype'] = $fileinfo->get_repository_type();
+        }
         $contents[] = $file;
     }
 
@@ -405,4 +387,425 @@ function folder_dndupload_handle($uploadinfo) {
 
     $DB->delete_records('folder', array('id' => $data->id));
     return false;
+}
+
+/**
+ * Given a coursemodule object, this function returns the extra
+ * information needed to print this activity in various places.
+ *
+ * If folder needs to be displayed inline we store additional information
+ * in customdata, so functions {@link folder_cm_info_dynamic()} and
+ * {@link folder_cm_info_view()} do not need to do DB queries
+ *
+ * @param cm_info $cm
+ * @return cached_cm_info info
+ */
+function folder_get_coursemodule_info($cm) {
+    global $DB;
+    if (!($folder = $DB->get_record('folder', array('id' => $cm->instance),
+            'id, name, display, showexpanded, showdownloadfolder, intro, introformat'))) {
+        return NULL;
+    }
+    $cminfo = new cached_cm_info();
+    $cminfo->name = $folder->name;
+    if ($folder->display == FOLDER_DISPLAY_INLINE) {
+        // prepare folder object to store in customdata
+        $fdata = new stdClass();
+        $fdata->showexpanded = $folder->showexpanded;
+        $fdata->showdownloadfolder = $folder->showdownloadfolder;
+        if ($cm->showdescription && strlen(trim($folder->intro))) {
+            $fdata->intro = $folder->intro;
+            if ($folder->introformat != FORMAT_MOODLE) {
+                $fdata->introformat = $folder->introformat;
+            }
+        }
+        $cminfo->customdata = $fdata;
+    } else {
+        if ($cm->showdescription) {
+            // Convert intro to html. Do not filter cached version, filters run at display time.
+            $cminfo->content = format_module_intro('folder', $folder, $cm->id, false);
+        }
+    }
+    return $cminfo;
+}
+
+/**
+ * Sets dynamic information about a course module
+ *
+ * This function is called from cm_info when displaying the module
+ * mod_folder can be displayed inline on course page and therefore have no course link
+ *
+ * @param cm_info $cm
+ */
+function folder_cm_info_dynamic(cm_info $cm) {
+    if ($cm->customdata) {
+        // the field 'customdata' is not empty IF AND ONLY IF we display contens inline
+        $cm->set_no_view_link();
+    }
+}
+
+/**
+ * Overwrites the content in the course-module object with the folder files list
+ * if folder.display == FOLDER_DISPLAY_INLINE
+ *
+ * @param cm_info $cm
+ */
+function folder_cm_info_view(cm_info $cm) {
+    global $PAGE;
+    if ($cm->uservisible && $cm->customdata &&
+            has_capability('mod/folder:view', $cm->context)) {
+        // Restore folder object from customdata.
+        // Note the field 'customdata' is not empty IF AND ONLY IF we display contens inline.
+        // Otherwise the content is default.
+        $folder = $cm->customdata;
+        $folder->id = (int)$cm->instance;
+        $folder->course = (int)$cm->course;
+        $folder->display = FOLDER_DISPLAY_INLINE;
+        $folder->name = $cm->name;
+        if (empty($folder->intro)) {
+            $folder->intro = '';
+        }
+        if (empty($folder->introformat)) {
+            $folder->introformat = FORMAT_MOODLE;
+        }
+        // display folder
+        $renderer = $PAGE->get_renderer('mod_folder');
+        $cm->set_content($renderer->display_folder($folder));
+    }
+}
+
+/**
+ * Mark the activity completed (if required) and trigger the course_module_viewed event.
+ *
+ * @param  stdClass $folder     folder object
+ * @param  stdClass $course     course object
+ * @param  stdClass $cm         course module object
+ * @param  stdClass $context    context object
+ * @since Moodle 3.0
+ */
+function folder_view($folder, $course, $cm, $context) {
+
+    // Trigger course_module_viewed event.
+    $params = array(
+        'context' => $context,
+        'objectid' => $folder->id
+    );
+
+    $event = \mod_folder\event\course_module_viewed::create($params);
+    $event->add_record_snapshot('course_modules', $cm);
+    $event->add_record_snapshot('course', $course);
+    $event->add_record_snapshot('folder', $folder);
+    $event->trigger();
+
+    // Completion.
+    $completion = new completion_info($course);
+    $completion->set_module_viewed($cm);
+}
+
+/**
+ * Check if the folder can be zipped and downloaded.
+ * @param stdClass $folder
+ * @param context_module $cm
+ * @return bool True if the folder can be zipped and downloaded.
+ * @throws \dml_exception
+ */
+function folder_archive_available($folder, $cm) {
+    if (!$folder->showdownloadfolder) {
+        return false;
+    }
+
+    $context = context_module::instance($cm->id);
+    $fs = get_file_storage();
+    $dir = $fs->get_area_tree($context->id, 'mod_folder', 'content', 0);
+
+    $size = folder_get_directory_size($dir);
+    $maxsize = get_config('folder', 'maxsizetodownload') * 1024 * 1024;
+
+    if ($size == 0) {
+        return false;
+    }
+
+    if (!empty($maxsize) && $size > $maxsize) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Recursively measure the size of the files in a directory.
+ * @param array $directory
+ * @return int size of directory contents in bytes
+ */
+function folder_get_directory_size($directory) {
+    $size = 0;
+
+    foreach ($directory['files'] as $file) {
+        $size += $file->get_filesize();
+    }
+
+    foreach ($directory['subdirs'] as $subdirectory) {
+        $size += folder_get_directory_size($subdirectory);
+    }
+
+    return $size;
+}
+
+/**
+ * Mark the activity completed (if required) and trigger the all_files_downloaded event.
+ *
+ * @param  stdClass $folder     folder object
+ * @param  stdClass $course     course object
+ * @param  stdClass $cm         course module object
+ * @param  stdClass $context    context object
+ * @since Moodle 3.1
+ */
+function folder_downloaded($folder, $course, $cm, $context) {
+    $params = array(
+        'context' => $context,
+        'objectid' => $folder->id
+    );
+    $event = \mod_folder\event\all_files_downloaded::create($params);
+    $event->add_record_snapshot('course_modules', $cm);
+    $event->add_record_snapshot('course', $course);
+    $event->add_record_snapshot('folder', $folder);
+    $event->trigger();
+
+    // Completion.
+    $completion = new completion_info($course);
+    $completion->set_module_viewed($cm);
+}
+
+/**
+ * Returns all uploads since a given time in specified folder.
+ *
+ * @param array $activities
+ * @param int $index
+ * @param int $timestart
+ * @param int $courseid
+ * @param int $cmid
+ * @param int $userid
+ * @param int $groupid not used, but required for compatibilty with other modules
+ */
+function folder_get_recent_mod_activity(&$activities, &$index, $timestart, $courseid, $cmid, $userid=0, $groupid=0) {
+    global $COURSE, $DB, $OUTPUT;
+
+    if ($COURSE->id == $courseid) {
+        $course = $COURSE;
+    } else {
+        $course = $DB->get_record('course', array('id' => $courseid));
+    }
+
+    $modinfo = get_fast_modinfo($course);
+    $cm = $modinfo->cms[$cmid];
+
+    $context = context_module::instance($cm->id);
+    if (!has_capability('mod/folder:view', $context)) {
+        return;
+    }
+    $files = folder_get_recent_activity($context, $timestart, $userid);
+
+    foreach ($files as $file) {
+        $tmpactivity = new stdClass();
+
+        $tmpactivity->type       = 'folder';
+        $tmpactivity->cmid       = $cm->id;
+        $tmpactivity->sectionnum = $cm->sectionnum;
+        $tmpactivity->timestamp  = $file->get_timemodified();
+        $tmpactivity->user       = core_user::get_user($file->get_userid());
+
+        $tmpactivity->content           = new stdClass();
+        $tmpactivity->content->url      = moodle_url::make_pluginfile_url($file->get_contextid(), 'mod_folder', 'content',
+            $file->get_itemid(), $file->get_filepath(), $file->get_filename());
+
+        if (file_extension_in_typegroup($file->get_filename(), 'web_image')) {
+            $image = $tmpactivity->content->url->out(false, array('preview' => 'tinyicon', 'oid' => $file->get_timemodified()));
+            $image = html_writer::empty_tag('img', array('src' => $image));
+        } else {
+            $image = $OUTPUT->pix_icon(file_file_icon($file, 24), $file->get_filename(), 'moodle');
+        }
+
+        $tmpactivity->content->image    = $image;
+        $tmpactivity->content->filename = $file->get_filename();
+
+        $activities[$index++] = $tmpactivity;
+    }
+
+}
+
+/**
+ * Outputs the folder uploads indicated by $activity.
+ *
+ * @param object $activity      the activity object the folder resides in
+ * @param int    $courseid      the id of the course the folder resides in
+ * @param bool   $detail        not used, but required for compatibilty with other modules
+ * @param int    $modnames      not used, but required for compatibilty with other modules
+ * @param bool   $viewfullnames not used, but required for compatibilty with other modules
+ */
+function folder_print_recent_mod_activity($activity, $courseid, $detail, $modnames, $viewfullnames) {
+    global $OUTPUT;
+
+    $content = $activity->content;
+    $tableoptions = [
+        'border' => '0',
+        'cellpadding' => '3',
+        'cellspacing' => '0'
+    ];
+    $output = html_writer::start_tag('table', $tableoptions);
+    $output .= html_writer::start_tag('tr');
+    $output .= html_writer::tag('td', $content->image, ['class' => 'fp-icon', 'valign' => 'top']);
+    $output .= html_writer::start_tag('td');
+    $output .= html_writer::start_div('fp-filename');
+    $output .= html_writer::link($content->url, $content->filename);
+    $output .= html_writer::end_div();
+
+    // Show the uploader.
+    $fullname = fullname($activity->user, $viewfullnames);
+    $userurl = new moodle_url('/user/view.php');
+    $userurl->params(['id' => $activity->user->id, 'course' => $courseid]);
+    $by = new stdClass();
+    $by->name = html_writer::link($userurl, $fullname);
+    $by->date = userdate($activity->timestamp);
+    $authornamedate = get_string('bynameondate', 'folder', $by);
+    $output .= html_writer::div($authornamedate, 'user');
+
+    // Finish up the table.
+    $output .= html_writer::end_tag('tr');
+    $output .= html_writer::end_tag('table');
+
+    echo $output;
+}
+
+/**
+ * Gets recent file uploads in a given folder. Does not perform security checks.
+ *
+ * @param object $context
+ * @param int $timestart
+ * @param int $userid
+ *
+ * @return array
+ */
+function folder_get_recent_activity($context, $timestart, $userid=0) {
+    $newfiles = array();
+    $fs = get_file_storage();
+    $files = $fs->get_area_files($context->id, 'mod_folder', 'content');
+    foreach ($files as $file) {
+        if ($file->get_timemodified() <= $timestart) {
+            continue;
+        }
+        if ($file->get_filename() === '.') {
+            continue;
+        }
+        if (!empty($userid) && $userid !== $file->get_userid()) {
+            continue;
+        }
+        $newfiles[] = $file;
+    }
+    return $newfiles;
+}
+
+/**
+ * Given a course and a date, prints a summary of all the new
+ * files posted in folder resources since that date
+ *
+ * @uses CONTEXT_MODULE
+ * @param object $course
+ * @param bool $viewfullnames capability
+ * @param int $timestart
+ * @return bool success
+ */
+function folder_print_recent_activity($course, $viewfullnames, $timestart) {
+    global $OUTPUT;
+
+    $folders = get_all_instances_in_course('folder', $course);
+
+    if (empty($folders)) {
+        return false;
+    }
+
+    $newfiles = array();
+
+    $modinfo = get_fast_modinfo($course);
+    foreach ($folders as $folder) {
+        // Skip resources if the user can't view them.
+        $cm = $modinfo->cms[$folder->coursemodule];
+        $context = context_module::instance($cm->id);
+        if (!has_capability('mod/folder:view', $context)) {
+            continue;
+        }
+
+        // Get the files uploaded in the current time frame.
+        $newfiles = array_merge($newfiles, folder_get_recent_activity($context, $timestart));
+    }
+
+    if (empty($newfiles)) {
+        return false;
+    }
+
+    // Build list of files.
+    echo $OUTPUT->heading(get_string('newfoldercontent', 'folder').':', 3);
+    $list = html_writer::start_tag('ul', ['class' => 'unlist']);
+    foreach ($newfiles as $file) {
+        $filename = $file->get_filename();
+        $url = moodle_url::make_pluginfile_url($file->get_contextid(), 'mod_folder', 'content',
+            $file->get_itemid(), $file->get_filepath(), $filename);
+
+        $list .= html_writer::start_tag('li');
+        $list .= html_writer::start_div('head');
+        $list .= html_writer::div(userdate($file->get_timemodified(), get_string('strftimerecent')), 'date');
+        $list .= html_writer::div($file->get_author(), 'name');
+        $list .= html_writer::end_div(); // Head.
+
+        $list .= html_writer::start_div('info');
+        $list .= html_writer::link($url, $filename);
+        $list .= html_writer::end_div(); // Info.
+        $list .= html_writer::end_tag('li');
+    }
+    $list .= html_writer::end_tag('ul');
+    echo $list;
+    return true;
+}
+
+/**
+ * Check if the module has any update that affects the current user since a given time.
+ *
+ * @param  cm_info $cm course module data
+ * @param  int $from the time to check updates from
+ * @param  array $filter  if we need to check only specific updates
+ * @return stdClass an object with the different type of areas indicating if they were updated or not
+ * @since Moodle 3.2
+ */
+function folder_check_updates_since(cm_info $cm, $from, $filter = array()) {
+    $updates = course_check_module_updates_since($cm, $from, array('content'), $filter);
+    return $updates;
+}
+
+/**
+ * This function receives a calendar event and returns the action associated with it, or null if there is none.
+ *
+ * This is used by block_myoverview in order to display the event appropriately. If null is returned then the event
+ * is not displayed on the block.
+ *
+ * @param calendar_event $event
+ * @param \core_calendar\action_factory $factory
+ * @return \core_calendar\local\event\entities\action_interface|null
+ */
+function mod_folder_core_calendar_provide_event_action(calendar_event $event,
+                                                     \core_calendar\action_factory $factory) {
+    $cm = get_fast_modinfo($event->courseid)->instances['folder'][$event->instance];
+
+    $completion = new \completion_info($cm->get_course());
+
+    $completiondata = $completion->get_data($cm, false);
+
+    if ($completiondata->completionstate != COMPLETION_INCOMPLETE) {
+        return null;
+    }
+
+    return $factory->create_instance(
+        get_string('view'),
+        new \moodle_url('/mod/folder/view.php', ['id' => $cm->id]),
+        1,
+        true
+    );
 }

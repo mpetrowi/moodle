@@ -17,8 +17,7 @@
 /**
  * Blog Menu Block page.
  *
- * @package    block
- * @subpackage blog_menu
+ * @package    block_blog_menu
  * @copyright  2009 Nicolas Connault
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -111,5 +110,14 @@ class block_blog_menu extends block_base {
 
         // Return the content object
         return $this->content;
+    }
+
+    /**
+     * Returns the role that best describes the blog menu block.
+     *
+     * @return string
+     */
+    public function get_aria_role() {
+        return 'navigation';
     }
 }

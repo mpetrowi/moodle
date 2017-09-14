@@ -25,17 +25,16 @@
 defined('MOODLE_INTERNAL') || die();
 
 function xmldb_editor_tinymce_upgrade($oldversion) {
-    global $CFG, $DB;
+    global $CFG;
 
-    $dbman = $DB->get_manager();
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
 
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
 
-    if ($oldversion < 2012083100) {
-        // Reset redesigned editor toolbar setting.
-        unset_config('customtoolbar', 'editor_tinymce');
-        upgrade_plugin_savepoint(true, 2012083100, 'editor', 'tinymce');
-    }
-
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }

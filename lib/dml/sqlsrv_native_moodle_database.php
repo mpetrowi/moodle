@@ -41,6 +41,39 @@ class sqlsrv_native_moodle_database extends moodle_database {
     protected $last_error_reporting; // To handle SQL*Server-Native driver default verbosity
     protected $temptables; // Control existing temptables (sqlsrv_moodle_temptables object)
     protected $collation;  // current DB collation cache
+    /**
+     * Does the used db version support ANSI way of limiting (2012 and higher)
+     * @var bool
+     */
+    protected $supportsoffsetfetch;
+
+    /** @var array list of open recordsets */
+    protected $recordsets = array();
+
+    /** @var array list of reserve words in MSSQL / Transact from http://msdn2.microsoft.com/en-us/library/ms189822.aspx */
+    protected $reservewords = [
+        "add", "all", "alter", "and", "any", "as", "asc", "authorization", "avg", "backup", "begin", "between", "break",
+        "browse", "bulk", "by", "cascade", "case", "check", "checkpoint", "close", "clustered", "coalesce", "collate", "column",
+        "commit", "committed", "compute", "confirm", "constraint", "contains", "containstable", "continue", "controlrow",
+        "convert", "count", "create", "cross", "current", "current_date", "current_time", "current_timestamp", "current_user",
+        "cursor", "database", "dbcc", "deallocate", "declare", "default", "delete", "deny", "desc", "disk", "distinct",
+        "distributed", "double", "drop", "dummy", "dump", "else", "end", "errlvl", "errorexit", "escape", "except", "exec",
+        "execute", "exists", "exit", "external", "fetch", "file", "fillfactor", "floppy", "for", "foreign", "freetext",
+        "freetexttable", "from", "full", "function", "goto", "grant", "group", "having", "holdlock", "identity",
+        "identity_insert", "identitycol", "if", "in", "index", "inner", "insert", "intersect", "into", "is", "isolation",
+        "join", "key", "kill", "left", "level", "like", "lineno", "load", "max", "merge", "min", "mirrorexit", "national",
+        "nocheck", "nonclustered", "not", "null", "nullif", "of", "off", "offsets", "on", "once", "only", "open",
+        "opendatasource", "openquery", "openrowset", "openxml", "option", "or", "order", "outer", "over", "percent", "perm",
+        "permanent", "pipe", "pivot", "plan", "precision", "prepare", "primary", "print", "privileges", "proc", "procedure",
+        "processexit", "public", "raiserror", "read", "readtext", "reconfigure", "references", "repeatable", "replication",
+        "restore", "restrict", "return", "revert", "revoke", "right", "rollback", "rowcount", "rowguidcol", "rule", "save",
+        "schema", "securityaudit", "select", "semantickeyphrasetable", "semanticsimilaritydetailstable",
+        "semanticsimilaritytable", "serializable", "session_user", "set", "setuser", "shutdown", "some", "statistics", "sum",
+        "system_user", "table", "tablesample", "tape", "temp", "temporary", "textsize", "then", "to", "top", "tran",
+        "transaction", "trigger", "truncate", "try_convert", "tsequal", "uncommitted", "union", "unique", "unpivot", "update",
+        "updatetext", "use", "user", "values", "varying", "view", "waitfor", "when", "where", "while", "with", "within group",
+        "work", "writetext"
+    ];
 
     /**
      * Constructor - instantiates the database, specifying if it's external (connect to other systems) or no (Moodle DB)
@@ -61,11 +94,7 @@ class sqlsrv_native_moodle_database extends moodle_database {
         // the name used by 'extension_loaded()' is case specific! The extension
         // therefore *could be* mixed case and hence not found.
         if (!function_exists('sqlsrv_num_rows')) {
-            if (stripos(PHP_OS, 'win') === 0) {
-                return get_string('nativesqlsrvnodriver', 'install');
-            } else {
-                return get_string('nativesqlsrvnonwindows', 'install');
-            }
+            return get_string('nativesqlsrvnodriver', 'install');
         }
         return true;
     }
@@ -116,18 +145,34 @@ class sqlsrv_native_moodle_database extends moodle_database {
     }
 
     /**
-     * Returns localised database description
-     * Note: can be used before connect()
-     * @return string
+     * Diagnose database and tables, this function is used
+     * to verify database and driver settings, db engine types, etc.
+     *
+     * @return string null means everything ok, string means problem found.
      */
-    public function get_configuration_hints() {
-        $str = get_string('databasesettingssub_sqlsrv', 'install');
-        $str .= "<p style='text-align:right'><a href=\"javascript:void(0)\" ";
-        $str .= "onclick=\"return window.open('http://docs.moodle.org/en/Using_the_Microsoft_SQL_Server_Driver_for_PHP')\"";
-        $str .= ">";
-        $str .= '<img src="pix/docs.gif'.'" alt="Docs" class="iconhelp" />';
-        $str .= get_string('moodledocslink', 'install').'</a></p>';
-        return $str;
+    public function diagnose() {
+        // Verify the database is running with READ_COMMITTED_SNAPSHOT enabled.
+        // (that's required to get snapshots/row versioning on READ_COMMITED mode).
+        $correctrcsmode = false;
+        $sql = "SELECT is_read_committed_snapshot_on
+                  FROM sys.databases
+                 WHERE name = '{$this->dbname}'";
+        $this->query_start($sql, null, SQL_QUERY_AUX);
+        $result = sqlsrv_query($this->sqlsrv, $sql);
+        $this->query_end($result);
+        if ($result) {
+            if ($row = sqlsrv_fetch_array($result)) {
+                $correctrcsmode = (bool)reset($row);
+            }
+        }
+        $this->free_result($result);
+
+        if (!$correctrcsmode) {
+            return get_string('mssqlrcsmodemissing', 'error');
+        }
+
+        // Arrived here, all right.
+        return null;
     }
 
     /**
@@ -143,6 +188,11 @@ class sqlsrv_native_moodle_database extends moodle_database {
      * @throws dml_connection_exception if error
      */
     public function connect($dbhost, $dbuser, $dbpass, $dbname, $prefix, array $dboptions=null) {
+        if ($prefix == '' and !$this->external) {
+            // Enforce prefixes for everybody but mysql.
+            throw new dml_exception('prefixcannotbeempty', $this->get_dbfamily());
+        }
+
         $driverstatus = $this->driver_installed();
 
         if ($driverstatus !== true) {
@@ -157,7 +207,13 @@ class sqlsrv_native_moodle_database extends moodle_database {
         sqlsrv_configure("LogSeverity", SQLSRV_LOG_SEVERITY_ERROR);
 
         $this->store_settings($dbhost, $dbuser, $dbpass, $dbname, $prefix, $dboptions);
-        $this->sqlsrv = sqlsrv_connect($this->dbhost, array
+
+        $dbhost = $this->dbhost;
+        if (!empty($dboptions['dbport'])) {
+            $dbhost .= ',' . $dboptions['dbport'];
+        }
+
+        $this->sqlsrv = sqlsrv_connect($dbhost, array
          (
           'UID' => $this->dbuser,
           'PWD' => $this->dbpass,
@@ -174,6 +230,9 @@ class sqlsrv_native_moodle_database extends moodle_database {
 
             throw new dml_connection_exception($dberr);
         }
+
+        // Disable logging until we are fully setup.
+        $this->query_log_prevent();
 
         // Allow quoted identifiers
         $sql = "SET QUOTED_IDENTIFIER ON";
@@ -216,6 +275,13 @@ class sqlsrv_native_moodle_database extends moodle_database {
         $this->query_end($result);
 
         $this->free_result($result);
+
+        $serverinfo = $this->get_server_info();
+        // Fetch/offset is supported staring from SQL Server 2012.
+        $this->supportsoffsetfetch = $serverinfo['version'] > '11';
+
+        // We can enable logging now.
+        $this->query_log_allow();
 
         // Connection established and configured, going to instantiate the temptables controller
         $this->temptables = new sqlsrv_native_moodle_temptables($this);
@@ -393,7 +459,7 @@ class sqlsrv_native_moodle_database extends moodle_database {
         if ($result) {
             while ($row = sqlsrv_fetch_array($result)) {
                 $tablename = reset($row);
-                if ($this->prefix !== '') {
+                if ($this->prefix !== false && $this->prefix !== '') {
                     if (strpos($tablename, $this->prefix) !== 0) {
                         continue;
                     }
@@ -474,11 +540,19 @@ class sqlsrv_native_moodle_database extends moodle_database {
      * @return array array of database_column_info objects indexed with column names
      */
     public function get_columns($table, $usecache = true) {
-        if ($usecache and isset($this->columns[$table])) {
-            return $this->columns[$table];
+        if ($usecache) {
+            if ($this->temptables->is_temptable($table)) {
+                if ($data = $this->get_temp_tables_cache()->get($table)) {
+                    return $data;
+                }
+            } else {
+                if ($data = $this->get_metacache()->get($table)) {
+                    return $data;
+                }
+            }
         }
 
-        $this->columns[$table] = array ();
+        $structure = array();
 
         if (!$this->temptables->is_temptable($table)) { // normal table, get metadata from own schema
             $sql = "SELECT column_name AS name,
@@ -537,12 +611,18 @@ class sqlsrv_native_moodle_database extends moodle_database {
             // id columns being auto_incremnt are PK by definition
             $info->primary_key = ($info->name == 'id' && $info->meta_type == 'R' && $info->auto_increment);
 
-            // Put correct length for character and LOB types
-            $info->max_length = $info->meta_type == 'C' ? $rawcolumn->char_max_length : $rawcolumn->max_length;
-            $info->max_length = ($info->meta_type == 'X' || $info->meta_type == 'B') ? -1 : $info->max_length;
+            if ($info->meta_type === 'C' and $rawcolumn->char_max_length == -1) {
+                // This is NVARCHAR(MAX), not a normal NVARCHAR.
+                $info->max_length = -1;
+                $info->meta_type = 'X';
+            } else {
+                // Put correct length for character and LOB types
+                $info->max_length = $info->meta_type == 'C' ? $rawcolumn->char_max_length : $rawcolumn->max_length;
+                $info->max_length = ($info->meta_type == 'X' || $info->meta_type == 'B') ? -1 : $info->max_length;
+            }
 
             // Scale
-            $info->scale = $rawcolumn->scale ? $rawcolumn->scale : false;
+            $info->scale = $rawcolumn->scale;
 
             // Prepare not_null info
             $info->not_null = $rawcolumn->is_nullable == 'NO' ? true : false;
@@ -558,11 +638,19 @@ class sqlsrv_native_moodle_database extends moodle_database {
             // Process binary
             $info->binary = $info->meta_type == 'B' ? true : false;
 
-            $this->columns[$table][$info->name] = new database_column_info($info);
+            $structure[$info->name] = new database_column_info($info);
         }
         $this->free_result($result);
 
-        return $this->columns[$table];
+        if ($usecache) {
+            if ($this->temptables->is_temptable($table)) {
+                $this->get_temp_tables_cache()->set($table, $structure);
+            } else {
+                $this->get_metacache()->set($table, $structure);
+            }
+        }
+
+        return $structure;
     }
 
     /**
@@ -650,6 +738,7 @@ class sqlsrv_native_moodle_database extends moodle_database {
            break;
 
           case 'IMAGE':
+          case 'VARBINARY':
           case 'VARBINARY(MAX)':
            $type = 'B';
            break;
@@ -667,17 +756,27 @@ class sqlsrv_native_moodle_database extends moodle_database {
 
     /**
      * Do NOT use in code, to be used by database_manager only!
-     * @param string $sql query
+     * @param string|array $sql query
+     * @param array|null $tablenames an array of xmldb table names affected by this request.
      * @return bool true
-     * @throws dml_exception A DML specific exception is thrown for any errors.
+     * @throws ddl_change_structure_exception A DDL specific exception is thrown for any errors.
      */
-    public function change_database_structure($sql) {
-        $this->reset_caches();
+    public function change_database_structure($sql, $tablenames = null) {
+        $this->get_manager(); // Includes DDL exceptions classes ;-)
+        $sqls = (array)$sql;
 
-        $this->query_start($sql, null, SQL_QUERY_STRUCTURE);
-        $result = sqlsrv_query($this->sqlsrv, $sql);
-        $this->query_end($result);
+        try {
+            foreach ($sqls as $sql) {
+                $this->query_start($sql, null, SQL_QUERY_STRUCTURE);
+                $result = sqlsrv_query($this->sqlsrv, $sql);
+                $this->query_end($result);
+            }
+        } catch (ddl_change_structure_exception $e) {
+            $this->reset_caches($tablenames);
+            throw $e;
+        }
 
+        $this->reset_caches($tablenames);
         return true;
     }
 
@@ -699,8 +798,8 @@ class sqlsrv_native_moodle_database extends moodle_database {
             return $sql;
         }
         // ok, we have verified sql statement with ? and correct number of params
-        $parts = explode('?', $sql);
-        $return = array_shift($parts);
+        $parts = array_reverse(explode('?', $sql));
+        $return = array_pop($parts);
         foreach ($params as $param) {
             if (is_bool($param)) {
                 $return .= (int)$param;
@@ -717,10 +816,11 @@ class sqlsrv_native_moodle_database extends moodle_database {
                 $return .= $param;
             } else {
                 $param = str_replace("'", "''", $param);
+                $param = str_replace("\0", "", $param);
                 $return .= "N'$param'";
             }
 
-            $return .= array_shift($parts);
+            $return .= array_pop($parts);
         }
         return $return;
     }
@@ -759,27 +859,74 @@ class sqlsrv_native_moodle_database extends moodle_database {
      * @throws dml_exception A DML specific exception is thrown for any errors.
      */
     public function get_recordset_sql($sql, array $params = null, $limitfrom = 0, $limitnum = 0) {
-        $limitfrom = (int)$limitfrom;
-        $limitnum = (int)$limitnum;
-        $limitfrom = max(0, $limitfrom);
-        $limitnum = max(0, $limitnum);
+
+        list($limitfrom, $limitnum) = $this->normalise_limit_from_num($limitfrom, $limitnum);
+        $needscrollable = (bool)$limitfrom; // To determine if we'll need to perform scroll to $limitfrom.
 
         if ($limitfrom or $limitnum) {
-            if ($limitnum >= 1) { // Only apply TOP clause if we have any limitnum (limitfrom offset is handled later)
-                $fetch = $limitfrom + $limitnum;
-                if (PHP_INT_MAX - $limitnum < $limitfrom) { // Check PHP_INT_MAX overflow
-                    $fetch = PHP_INT_MAX;
+            if (!$this->supportsoffsetfetch) {
+                if ($limitnum >= 1) { // Only apply TOP clause if we have any limitnum (limitfrom offset is handled later).
+                    $fetch = $limitfrom + $limitnum;
+                    if (PHP_INT_MAX - $limitnum < $limitfrom) { // Check PHP_INT_MAX overflow.
+                        $fetch = PHP_INT_MAX;
+                    }
+                    $sql = preg_replace('/^([\s(])*SELECT([\s]+(DISTINCT|ALL))?(?!\s*TOP\s*\()/i',
+                                        "\\1SELECT\\2 TOP $fetch", $sql);
                 }
-                $sql = preg_replace('/^([\s(])*SELECT([\s]+(DISTINCT|ALL))?(?!\s*TOP\s*\()/i',
-                                    "\\1SELECT\\2 TOP $fetch", $sql);
+            } else {
+                $needscrollable = false; // Using supported fetch/offset, no need to scroll anymore.
+                $sql = (substr($sql, -1) === ';') ? substr($sql, 0, -1) : $sql;
+                // We need order by to use FETCH/OFFSET.
+                // Ordering by first column shouldn't break anything if there was no order in the first place.
+                if (!strpos(strtoupper($sql), "ORDER BY")) {
+                    $sql .= " ORDER BY 1";
+                }
+
+                $sql .= " OFFSET ".$limitfrom." ROWS ";
+
+                if ($limitnum > 0) {
+                    $sql .= " FETCH NEXT ".$limitnum." ROWS ONLY";
+                }
             }
         }
-        $result = $this->do_query($sql, $params, SQL_QUERY_SELECT, false, (bool)$limitfrom);
 
-        if ($limitfrom) { // Skip $limitfrom records
+        // Add WITH (NOLOCK) to any temp tables.
+        $sql = $this->add_no_lock_to_temp_tables($sql);
+
+        $result = $this->do_query($sql, $params, SQL_QUERY_SELECT, false, $needscrollable);
+
+        if ($needscrollable) { // Skip $limitfrom records.
             sqlsrv_fetch($result, SQLSRV_SCROLL_ABSOLUTE, $limitfrom - 1);
         }
         return $this->create_recordset($result);
+    }
+
+    /**
+     * Use NOLOCK on any temp tables. Since it's a temp table and uncommitted reads are low risk anyway.
+     *
+     * @param string $sql the SQL select query to execute.
+     * @return string The SQL, with WITH (NOLOCK) added to all temp tables
+     */
+    protected function add_no_lock_to_temp_tables($sql) {
+        return preg_replace_callback('/(\{([a-z][a-z0-9_]*)\})(\s+(\w+))?/', function($matches) {
+            $table = $matches[1]; // With the braces, so we can put it back in the query.
+            $name = $matches[2]; // Without the braces, so we can check if it's a temptable.
+            $tail = isset($matches[3]) ? $matches[3] : ''; // Catch the next word afterwards so that we can check if it's an alias.
+            $replacement = $matches[0]; // The table and the word following it, so we can replace it back if no changes are needed.
+
+            if ($this->temptables && $this->temptables->is_temptable($name)) {
+                if (!empty($tail)) {
+                    if (in_array(strtolower(trim($tail)), $this->reservewords)) {
+                        // If the table is followed by a reserve word, it's not an alias so put the WITH (NOLOCK) in between.
+                        return $table . ' WITH (NOLOCK)' . $tail;
+                    }
+                }
+                // If the table is not followed by a reserve word, put the WITH (NOLOCK) after the whole match.
+                return $replacement . ' WITH (NOLOCK)';
+            } else {
+                return $replacement;
+            }
+        }, $sql);
     }
 
     /**
@@ -789,7 +936,20 @@ class sqlsrv_native_moodle_database extends moodle_database {
      * @return sqlsrv_native_moodle_recordset
      */
     protected function create_recordset($result) {
-        return new sqlsrv_native_moodle_recordset($result);
+        $rs = new sqlsrv_native_moodle_recordset($result, $this);
+        $this->recordsets[] = $rs;
+        return $rs;
+    }
+
+    /**
+     * Do not use outside of recordset class.
+     * @internal
+     * @param sqlsrv_native_moodle_recordset $rs
+     */
+    public function recordset_closed(sqlsrv_native_moodle_recordset $rs) {
+        if ($key = array_search($rs, $this->recordsets, true)) {
+            unset($this->recordsets[$key]);
+        }
     }
 
     /**
@@ -963,6 +1123,10 @@ class sqlsrv_native_moodle_database extends moodle_database {
         $dataobject = (array)$dataobject;
 
         $columns = $this->get_columns($table);
+        if (empty($columns)) {
+            throw new dml_exception('ddltablenotexist', $table);
+        }
+
         $cleaned = array ();
 
         foreach ($dataobject as $field => $value) {
@@ -1189,6 +1353,24 @@ class sqlsrv_native_moodle_database extends moodle_database {
         return $this->collation;
     }
 
+    public function sql_equal($fieldname, $param, $casesensitive = true, $accentsensitive = true, $notequal = false) {
+        $equalop = $notequal ? '<>' : '=';
+        $collation = $this->get_collation();
+
+        if ($casesensitive) {
+            $collation = str_replace('_CI', '_CS', $collation);
+        } else {
+            $collation = str_replace('_CS', '_CI', $collation);
+        }
+        if ($accentsensitive) {
+            $collation = str_replace('_AI', '_AS', $collation);
+        } else {
+            $collation = str_replace('_AS', '_AI', $collation);
+        }
+
+        return "$fieldname COLLATE $collation $equalop $param";
+    }
+
     /**
      * Returns 'LIKE' part of a query.
      *
@@ -1226,7 +1408,7 @@ class sqlsrv_native_moodle_database extends moodle_database {
         $arr = func_get_args();
 
         foreach ($arr as $key => $ele) {
-            $arr[$key] = ' CAST('.$ele.' AS VARCHAR(255)) ';
+            $arr[$key] = ' CAST('.$ele.' AS NVARCHAR(255)) ';
         }
         $s = implode(' + ', $arr);
 
@@ -1240,12 +1422,7 @@ class sqlsrv_native_moodle_database extends moodle_database {
         for ($n = count($elements) - 1; $n > 0; $n--) {
             array_splice($elements, $n, 0, $separator);
         }
-        $s = implode(' + ', $elements);
-
-        if ($s === '') {
-            return " '' ";
-        }
-        return " $s ";
+        return call_user_func_array(array($this, 'sql_concat'), $elements);
     }
 
     public function sql_isempty($tablename, $fieldname, $nullablefield, $textfield) {
@@ -1266,7 +1443,7 @@ class sqlsrv_native_moodle_database extends moodle_database {
     }
 
     public function sql_order_by_text($fieldname, $numchars = 32) {
-        return ' CONVERT(varchar, '.$fieldname.', '.$numchars.')';
+        return " CONVERT(varchar({$numchars}), {$fieldname})";
     }
 
     /**
@@ -1292,10 +1469,20 @@ class sqlsrv_native_moodle_database extends moodle_database {
         }
 
         if ($length === false) {
-            return "SUBSTRING($expr, $start, (LEN($expr) - $start + 1))";
+            return "SUBSTRING($expr, " . $this->sql_cast_char2int($start) . ", 2^31-1)";
         } else {
-            return "SUBSTRING($expr, $start, $length)";
+            return "SUBSTRING($expr, " . $this->sql_cast_char2int($start) . ", " . $this->sql_cast_char2int($length) . ")";
         }
+    }
+
+    /**
+     * Does this driver support tool_replace?
+     *
+     * @since Moodle 2.6.1
+     * @return bool
+     */
+    public function replace_all_text_supported() {
+        return true;
     }
 
     public function session_lock_supported() {
@@ -1347,6 +1534,10 @@ class sqlsrv_native_moodle_database extends moodle_database {
         if (!$this->session_lock_supported()) {
             return;
         }
+        if (!$this->used_for_db_sessions) {
+            return;
+        }
+
         parent::release_session_lock($rowid);
 
         $fullname = $this->dbname.'-'.$this->prefix.'-session-'.$rowid;
@@ -1363,6 +1554,12 @@ class sqlsrv_native_moodle_database extends moodle_database {
      * @return void
      */
     protected function begin_transaction() {
+        // Recordsets do not work well with transactions in SQL Server,
+        // let's prefetch the recordsets to memory to work around these problems.
+        foreach ($this->recordsets as $rs) {
+            $rs->transaction_starts();
+        }
+
         $this->query_start('native sqlsrv_begin_transaction', NULL, SQL_QUERY_AUX);
         $result = sqlsrv_begin_transaction($this->sqlsrv);
         $this->query_end($result);

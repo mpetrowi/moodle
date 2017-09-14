@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'qformat_examview';
-$plugin->version   = 2012061701;
+$plugin->version   = 2017051500;
 
-$plugin->requires  = 2012061700;
+$plugin->requires  = 2017050500;
 
 $plugin->maturity  = MATURITY_STABLE;

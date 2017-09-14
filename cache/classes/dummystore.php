@@ -37,7 +37,7 @@ defined('MOODLE_INTERNAL') || die();
  * @copyright  2012 Sam Hemelryk
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class cachestore_dummy implements cache_store {
+class cachestore_dummy extends cache_store {
 
     /**
      * The name of this store.
@@ -46,14 +46,15 @@ class cachestore_dummy implements cache_store {
     protected $name;
 
     /**
-     * Gets set to true if this store is going to persist data.
-     * This happens when the definition doesn't require it as the loader will not be persisting information and something has to.
+     * Gets set to true if this store is going to store data.
+     * This happens when the definition doesn't require static acceleration as the loader will not be storing information and
+     * something has to.
      * @var bool
      */
     protected $persist = false;
 
     /**
-     * The persistent store array
+     * The stored data array
      * @var array
      */
     protected $store = array();
@@ -106,8 +107,18 @@ class cachestore_dummy implements cache_store {
      * @param cache_definition $definition
      */
     public function initialise(cache_definition $definition) {
-        // If the definition isn't persistent then we need to be persistent here.
-        $this->persist = !$definition->should_be_persistent();
+        // If the definition isn't using static acceleration then we need to be store data here.
+        // The reasoning behind this is that:
+        //   - If the definition is using static acceleration then the cache loader is going to
+        //     store things in its static array.
+        //   - If the definition is not using static acceleration then the cache loader won't try to store anything
+        //     and we will need to store it here in order to make sure it is accessible.
+        if ($definition->get_mode() !== self::MODE_APPLICATION) {
+            // Neither the request cache nor the session cache provide static acceleration.
+            $this->persist = true;
+        } else {
+            $this->persist = !$definition->use_static_acceleration();
+        }
     }
 
     /**
@@ -119,43 +130,11 @@ class cachestore_dummy implements cache_store {
     }
 
     /**
-     * Returns true if this is ready.
-     * @return bool
-     */
-    public function is_ready() {
-        return true;
-    }
-
-    /**
      * Returns true the given mode is supported.
      * @param int $mode
      * @return bool
      */
     public static function is_supported_mode($mode) {
-        return true;
-    }
-
-    /**
-     * Returns true if this store supports data guarantee.
-     * @return bool
-     */
-    public function supports_data_guarantee() {
-        return false;
-    }
-
-    /**
-     * Returns true if this store supports multiple identifiers.
-     * @return bool
-     */
-    public function supports_multiple_indentifiers() {
-        return false;
-    }
-
-    /**
-     * Returns true if this store supports a native ttl.
-     * @return bool
-     */
-    public function supports_native_ttl() {
         return true;
     }
 
@@ -211,9 +190,9 @@ class cachestore_dummy implements cache_store {
             foreach ($keyvaluearray as $pair) {
                 $this->store[$pair['key']] = $pair['value'];
             }
-            return count($keyvaluearray);
+
         }
-        return 0;
+        return count($keyvaluearray);
     }
 
     /**
@@ -250,8 +229,24 @@ class cachestore_dummy implements cache_store {
 
     /**
      * Performs any necessary clean up when the store instance is being deleted.
+     *
+     * @deprecated since 3.2
+     * @see cachestore_dummy::instance_deleted()
      */
     public function cleanup() {
+        debugging('cachestore_dummy::cleanup() is deprecated. Please use cachestore_dummy::instance_deleted() instead.',
+            DEBUG_DEVELOPER);
+        $this->instance_deleted();
+    }
+
+    /**
+     * Performs any necessary operation when the store instance is being deleted.
+     *
+     * This method may be called before the store has been initialised.
+     *
+     * @since Moodle 3.2
+     */
+    public function instance_deleted() {
         $this->purge();
     }
 
@@ -263,8 +258,19 @@ class cachestore_dummy implements cache_store {
      */
     public static function initialise_test_instance(cache_definition $definition) {
         $cache = new cachestore_dummy('Dummy store test');
-        $cache->initialise($definition);
-        return $cache;;
+        if ($cache->is_ready()) {
+            $cache->initialise($definition);
+        }
+        return $cache;
+    }
+
+    /**
+     * Generates the appropriate configuration required for unit testing.
+     *
+     * @return array Array of unit test configuration data to be used by initialise().
+     */
+    public static function unit_test_configuration() {
+        return [];
     }
 
     /**

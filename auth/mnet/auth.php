@@ -1,20 +1,29 @@
 <?php
+// This file is part of Moodle - http://moodle.org/
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @author Martin Dougiamas
- * @license http://www.gnu.org/copyleft/gpl.html GNU Public License
- * @package moodle multiauth
- *
  * Authentication Plugin: Moodle Network Authentication
- *
  * Multiple host authentication support for Moodle Network.
  *
- * 2006-11-01  File created.
+ * @package auth_mnet
+ * @author Martin Dougiamas
+ * @license http://www.gnu.org/copyleft/gpl.html GNU Public License
  */
 
-if (!defined('MOODLE_INTERNAL')) {
-    die('Direct access to this script is forbidden.');    ///  It must be included from a Moodle page
-}
+defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->libdir.'/authlib.php');
 
@@ -26,10 +35,20 @@ class auth_plugin_mnet extends auth_plugin_base {
     /**
      * Constructor.
      */
-    function auth_plugin_mnet() {
+    public function __construct() {
         $this->authtype = 'mnet';
         $this->config = get_config('auth_mnet');
         $this->mnet = get_mnet_environment();
+    }
+
+    /**
+     * Old syntax of class constructor. Deprecated in PHP7.
+     *
+     * @deprecated since Moodle 3.1
+     */
+    public function auth_plugin_mnet() {
+        debugging('Use of class name as constructor is deprecated', DEBUG_DEVELOPER);
+        self::__construct();
     }
 
     /**
@@ -49,7 +68,7 @@ class auth_plugin_mnet extends auth_plugin_base {
      * Return user data for the provided token, compare with user_agent string.
      *
      * @param  string $token    The unique ID provided by remotehost.
-     * @param  string $UA       User Agent string.
+     * @param  string $useragent       User Agent string.
      * @return array  $userdata Array of user info for remote host
      */
     function user_authorise($token, $useragent) {
@@ -132,12 +151,12 @@ class auth_plugin_mnet extends auth_plugin_base {
         global $CFG, $USER, $DB;
         require_once $CFG->dirroot . '/mnet/xmlrpc/client.php';
 
-        if (session_is_loggedinas()) {
+        if (\core\session\manager::is_loggedinas()) {
             print_error('notpermittedtojumpas', 'mnet');
         }
 
         // check remote login permissions
-        if (! has_capability('moodle/site:mnetlogintoremote', get_system_context())
+        if (! has_capability('moodle/site:mnetlogintoremote', context_system::instance())
                 or is_mnet_remote_user($USER)
                 or isguestuser()
                 or !isloggedin()) {
@@ -207,6 +226,7 @@ class auth_plugin_mnet extends auth_plugin_base {
         global $CFG, $DB;
         require_once $CFG->dirroot . '/mnet/xmlrpc/client.php';
         require_once $CFG->libdir . '/gdlib.php';
+        require_once($CFG->dirroot.'/user/lib.php');
 
         // verify the remote host is configured locally before attempting RPC call
         if (! $remotehost = $DB->get_record('mnet_host', array('wwwroot' => $remotepeer->wwwroot, 'deleted' => 0))) {
@@ -243,7 +263,7 @@ class auth_plugin_mnet extends auth_plugin_base {
             exit;
         }
 
-        if (user_not_fully_set_up($remoteuser)) {
+        if (user_not_fully_set_up($remoteuser, false)) {
             print_error('notenoughidpinfo', 'mnet');
             exit;
         }
@@ -279,10 +299,10 @@ class auth_plugin_mnet extends auth_plugin_base {
             } See MDL-21327   for why this is commented out
             */
             $remoteuser->mnethostid = $remotehost->id;
-            $remoteuser->firstaccess = time(); // First time user in this server, grab it here
+            $remoteuser->firstaccess = 0;
             $remoteuser->confirmed = 1;
 
-            $remoteuser->id = $DB->insert_record('user', $remoteuser);
+            $remoteuser->id = user_create_user($remoteuser, false);
             $firsttime = true;
             $localuser = $remoteuser;
         }
@@ -349,11 +369,7 @@ class auth_plugin_mnet extends auth_plugin_base {
         }
 
         $localuser->mnethostid = $remotepeer->id;
-        if (empty($localuser->firstaccess)) { // Now firstaccess, grab it here
-            $localuser->firstaccess = time();
-        }
-
-        $DB->update_record('user', $localuser);
+        user_update_user($localuser, false);
 
         if (!$firsttime) {
             // repeat customer! let the IDP know about enrolments
@@ -378,23 +394,28 @@ class auth_plugin_mnet extends auth_plugin_base {
                 $extra = $DB->get_records_sql($sql);
 
                 $keys = array_keys($courses);
-                $defaultrole = reset(get_archetype_roles('student'));
-                //$defaultrole = get_default_course_role($ccache[$shortname]); //TODO: rewrite this completely, there is no default course role any more!!!
-                foreach ($keys AS $id) {
-                    if ($courses[$id]->visible == 0) {
-                        unset($courses[$id]);
-                        continue;
-                    }
-                    $courses[$id]->cat_id          = $courses[$id]->category;
-                    $courses[$id]->defaultroleid   = $defaultrole->id;
-                    unset($courses[$id]->category);
-                    unset($courses[$id]->visible);
+                $studentroles = get_archetype_roles('student');
+                if (!empty($studentroles)) {
+                    $defaultrole = reset($studentroles);
+                    //$defaultrole = get_default_course_role($ccache[$shortname]); //TODO: rewrite this completely, there is no default course role any more!!!
+                    foreach ($keys AS $id) {
+                        if ($courses[$id]->visible == 0) {
+                            unset($courses[$id]);
+                            continue;
+                        }
+                        $courses[$id]->cat_id          = $courses[$id]->category;
+                        $courses[$id]->defaultroleid   = $defaultrole->id;
+                        unset($courses[$id]->category);
+                        unset($courses[$id]->visible);
 
-                    $courses[$id]->cat_name        = $extra[$id]->cat_name;
-                    $courses[$id]->cat_description = $extra[$id]->cat_description;
-                    $courses[$id]->defaultrolename = $defaultrole->name;
-                    // coerce to array
-                    $courses[$id] = (array)$courses[$id];
+                        $courses[$id]->cat_name        = $extra[$id]->cat_name;
+                        $courses[$id]->cat_description = $extra[$id]->cat_description;
+                        $courses[$id]->defaultrolename = $defaultrole->name;
+                        // coerce to array
+                        $courses[$id] = (array)$courses[$id];
+                    }
+                } else {
+                    throw new moodle_exception('unknownrole', 'error', '', 'student');
                 }
             } else {
                 // if the array is empty, send it anyway
@@ -596,98 +617,6 @@ class auth_plugin_mnet extends auth_plugin_base {
     }
 
     /**
-     * Prints a form for configuring this authentication plugin.
-     *
-     * This function is called from admin/auth.php, and outputs a full page with
-     * a form for configuring this plugin.
-     *
-     * @param object $config
-     * @param object $err
-     * @param array $user_fields
-     */
-    function config_form($config, $err, $user_fields) {
-        global $CFG, $DB;
-
-         $query = "
-            SELECT
-                h.id,
-                h.name as hostname,
-                h.wwwroot,
-                h2idp.publish as idppublish,
-                h2idp.subscribe as idpsubscribe,
-                idp.name as idpname,
-                h2sp.publish as sppublish,
-                h2sp.subscribe as spsubscribe,
-                sp.name as spname
-            FROM
-                {mnet_host} h
-            LEFT JOIN
-                {mnet_host2service} h2idp
-            ON
-               (h.id = h2idp.hostid AND
-               (h2idp.publish = 1 OR
-                h2idp.subscribe = 1))
-            INNER JOIN
-                {mnet_service} idp
-            ON
-               (h2idp.serviceid = idp.id AND
-                idp.name = 'sso_idp')
-            LEFT JOIN
-                {mnet_host2service} h2sp
-            ON
-               (h.id = h2sp.hostid AND
-               (h2sp.publish = 1 OR
-                h2sp.subscribe = 1))
-            INNER JOIN
-                {mnet_service} sp
-            ON
-               (h2sp.serviceid = sp.id AND
-                sp.name = 'sso_sp')
-            WHERE
-               ((h2idp.publish = 1 AND h2sp.subscribe = 1) OR
-               (h2sp.publish = 1 AND h2idp.subscribe = 1)) AND
-                h.id != ?
-            ORDER BY
-                h.name ASC";
-
-        $id_providers       = array();
-        $service_providers  = array();
-        if ($resultset = $DB->get_records_sql($query, array($CFG->mnet_localhost_id))) {
-            foreach($resultset as $hostservice) {
-                if(!empty($hostservice->idppublish) && !empty($hostservice->spsubscribe)) {
-                    $service_providers[]= array('id' => $hostservice->id, 'name' => $hostservice->hostname, 'wwwroot' => $hostservice->wwwroot);
-                }
-                if(!empty($hostservice->idpsubscribe) && !empty($hostservice->sppublish)) {
-                    $id_providers[]= array('id' => $hostservice->id, 'name' => $hostservice->hostname, 'wwwroot' => $hostservice->wwwroot);
-                }
-            }
-        }
-
-        include "config.html";
-    }
-
-    /**
-     * Processes and stores configuration data for this authentication plugin.
-     */
-    function process_config($config) {
-        // set to defaults if undefined
-        if (!isset ($config->rpc_negotiation_timeout)) {
-            $config->rpc_negotiation_timeout = '30';
-        }
-        /*
-        if (!isset ($config->auto_add_remote_users)) {
-            $config->auto_add_remote_users = '0';
-        } See MDL-21327   for why this is commented out
-        set_config('auto_add_remote_users',   $config->auto_add_remote_users,   'auth_mnet');
-        */
-
-        // save settings
-        set_config('rpc_negotiation_timeout', $config->rpc_negotiation_timeout, 'auth_mnet');
-
-        return true;
-    }
-
-    /**
      * Poll the IdP server to let it know that a user it has authenticated is still
      * online
      *
@@ -750,84 +679,6 @@ class auth_plugin_mnet extends auth_plugin_base {
                           join("\n", $mnet_request->error));
                 break;
             }
-            $mnethostlogssql = "
-            SELECT
-                mhostlogs.remoteid, mhostlogs.time, mhostlogs.userid, mhostlogs.ip,
-                mhostlogs.course, mhostlogs.module, mhostlogs.cmid, mhostlogs.action,
-                mhostlogs.url, mhostlogs.info, mhostlogs.username, c.fullname as coursename,
-                c.modinfo
-            FROM
-                (
-                    SELECT
-                        l.id as remoteid, l.time, l.userid, l.ip, l.course, l.module, l.cmid,
-                        l.action, l.url, l.info, u.username
-                    FROM
-                        {user} u
-                        INNER JOIN {log} l on l.userid = u.id
-                    WHERE
-                        u.mnethostid = ?
-                        AND l.id > ?
-                    ORDER BY remoteid ASC
-                    LIMIT 500
-                ) mhostlogs
-                INNER JOIN {course} c on c.id = mhostlogs.course
-            ORDER by mhostlogs.remoteid ASC";
-
-            $mnethostlogs = $DB->get_records_sql($mnethostlogssql, array($mnethostid, $mnet_request->response['last log id']));
-
-            if ($mnethostlogs == false) {
-                continue;
-            }
-
-            $processedlogs = array();
-
-            foreach($mnethostlogs as $hostlog) {
-                // Extract the name of the relevant module instance from the
-                // course modinfo if possible.
-                if (!empty($hostlog->modinfo) && !empty($hostlog->cmid)) {
-                    $modinfo = unserialize($hostlog->modinfo);
-                    unset($hostlog->modinfo);
-                    $modulearray = array();
-                    foreach($modinfo as $module) {
-                        $modulearray[$module->cm] = $module->name;
-                    }
-                    $hostlog->resource_name = $modulearray[$hostlog->cmid];
-                } else {
-                    $hostlog->resource_name = '';
-                }
-
-                $processedlogs[] = array (
-                                    'remoteid'      => $hostlog->remoteid,
-                                    'time'          => $hostlog->time,
-                                    'userid'        => $hostlog->userid,
-                                    'ip'            => $hostlog->ip,
-                                    'course'        => $hostlog->course,
-                                    'coursename'    => $hostlog->coursename,
-                                    'module'        => $hostlog->module,
-                                    'cmid'          => $hostlog->cmid,
-                                    'action'        => $hostlog->action,
-                                    'url'           => $hostlog->url,
-                                    'info'          => $hostlog->info,
-                                    'resource_name' => $hostlog->resource_name,
-                                    'username'      => $hostlog->username
-                                 );
-            }
-
-            unset($hostlog);
-
-            $mnet_request = new mnet_xmlrpc_client();
-            $mnet_request->set_method('auth/mnet/auth.php/refresh_log');
-
-            // set $token and $useragent parameters
-            $mnet_request->add_param($processedlogs);
-
-            if ($mnet_request->send($mnet_peer) === true) {
-                if ($mnet_request->response['code'] > 0) {
-                    debugging($mnet_request->response['message']);
-                }
-            } else {
-                debugging("Server side error has occured on host $mnet_peer->ip: " .join("\n", $mnet_request->error));
-            }
         }
     }
 
@@ -835,52 +686,13 @@ class auth_plugin_mnet extends auth_plugin_base {
      * Receives an array of log entries from an SP and adds them to the mnet_log
      * table
      *
+     * @deprecated since Moodle 2.8 Please don't use this function for recording mnet logs.
      * @param   array   $array      An array of usernames
      * @return  string              "All ok" or an error message
      */
     function refresh_log($array) {
-        global $CFG, $DB;
-        $remoteclient = get_mnet_remote_client();
-
-        // We don't want to output anything to the client machine
-        $start = ob_start();
-
-        $returnString = '';
-        $transaction = $DB->start_delegated_transaction();
-        $useridarray = array();
-
-        foreach($array as $logEntry) {
-            $logEntryObj = (object)$logEntry;
-            $logEntryObj->hostid = $remoteclient->id;
-
-            if (isset($useridarray[$logEntryObj->username])) {
-                $logEntryObj->userid = $useridarray[$logEntryObj->username];
-            } else {
-                $logEntryObj->userid = $DB->get_field('user', 'id', array('username'=>$logEntryObj->username, 'mnethostid'=>(int)$logEntryObj->hostid));
-                if ($logEntryObj->userid == false) {
-                    $logEntryObj->userid = 0;
-                }
-                $useridarray[$logEntryObj->username] = $logEntryObj->userid;
-            }
-
-            unset($logEntryObj->username);
-
-            $logEntryObj = $this->trim_logline($logEntryObj);
-            $insertok = $DB->insert_record('mnet_log', $logEntryObj, false);
-
-            if ($insertok) {
-                $remoteclient->last_log_id = $logEntryObj->remoteid;
-            } else {
-                $returnString .= 'Record with id '.$logEntryObj->remoteid." failed to insert.\n";
-            }
-        }
-        $remoteclient->commit();
-        $transaction->allow_commit();
-
-        $end = ob_end_clean();
-
-        if (empty($returnString)) return array('code' => 0, 'message' => 'All ok');
-        return array('code' => 1, 'message' => $returnString);
+        debugging('refresh_log() is deprecated, The transfer of logs through mnet are no longer recorded.', DEBUG_DEVELOPER);
+        return array('code' => 0, 'message' => 'All ok');
     }
 
     /**
@@ -914,7 +726,7 @@ class auth_plugin_mnet extends auth_plugin_base {
                 $returnString .= "We failed to refresh the session for the following usernames: \n".implode("\n", $subArray)."\n\n";
             } else {
                 foreach($results as $emigrant) {
-                    session_touch($emigrant->session_id);
+                    \core\session\manager::touch_session($emigrant->session_id);
                 }
             }
         }
@@ -936,7 +748,6 @@ class auth_plugin_mnet extends auth_plugin_base {
         // run the keepalive client
         $this->keepalive_client();
 
-        // admin/cron.php should have run srand for us
         $random100 = rand(0,100);
         if ($random100 < 10) {     // Approximately 10% of the time.
             // nuke olden sessions
@@ -1071,7 +882,7 @@ class auth_plugin_mnet extends auth_plugin_base {
                                  array('useragent'=>$useragent, 'userid'=>$userid));
 
         if (isset($remoteclient) && isset($remoteclient->id)) {
-            session_kill_user($userid);
+            \core\session\manager::kill_user_sessions($userid);
         }
         return $returnstring;
     }
@@ -1091,7 +902,7 @@ class auth_plugin_mnet extends auth_plugin_base {
         $session = $DB->get_record('mnet_session', array('username'=>$username, 'mnethostid'=>$remoteclient->id, 'useragent'=>$useragent));
         $DB->delete_records('mnet_session', array('username'=>$username, 'mnethostid'=>$remoteclient->id, 'useragent'=>$useragent));
         if (false != $session) {
-            session_kill($session->session_id);
+            \core\session\manager::kill_session($session->session_id);
             return true;
         }
         return false;
@@ -1108,7 +919,7 @@ class auth_plugin_mnet extends auth_plugin_base {
         global $CFG;
         if (is_array($sessionArray)) {
             while($session = array_pop($sessionArray)) {
-                session_kill($session->session_id);
+                \core\session\manager::kill_session($session->session_id);
             }
             return true;
         }
@@ -1128,7 +939,7 @@ class auth_plugin_mnet extends auth_plugin_base {
      *
      * @see process_new_icon()
      * @uses mnet_remote_client callable via MNet XML-RPC
-     * @param int $userid The id of the user
+     * @param int $username The id of the user
      * @return false|array false if user not found, empty array if no picture exists, array with data otherwise
      */
     function fetch_user_image($username) {
@@ -1253,19 +1064,10 @@ class auth_plugin_mnet extends auth_plugin_base {
     }
 
     /**
-     * Returns a list of potential IdPs that this authentication plugin supports.
-     * This is used to provide links on the login page.
+     * Returns a list of MNet IdPs that the user can roam from.
      *
-     * @param string $wantsurl the relative url fragment the user wants to get to.  You can use this to compose a returnurl, for example
-     *
-     * @return array like:
-     *              array(
-     *                  array(
-     *                      'url' => 'http://someurl',
-     *                      'icon' => new pix_icon(...),
-     *                      'name' => get_string('somename', 'auth_yourplugin'),
-     *                 ),
-     *             )
+     * @param string $wantsurl The relative url fragment the user wants to get to.
+     * @return array List of arrays with keys url, icon and name.
      */
     function loginpage_idp_list($wantsurl) {
         global $DB, $CFG;
@@ -1299,5 +1101,121 @@ class auth_plugin_mnet extends auth_plugin_base {
             );
         }
         return $idps;
+    }
+
+    /**
+     * Test if settings are correct, print info to output.
+     */
+    public function test_settings() {
+        global $CFG, $OUTPUT, $DB;
+
+        // Generate warning if MNET is disabled.
+        if (empty($CFG->mnet_dispatcher_mode) || $CFG->mnet_dispatcher_mode !== 'strict') {
+                echo $OUTPUT->notification(get_string('mnetdisabled', 'mnet'), 'notifyproblem');
+                return;
+        }
+
+        // Generate full list of ID and service providers.
+        $query = "
+           SELECT
+               h.id,
+               h.name as hostname,
+               h.wwwroot,
+               h2idp.publish as idppublish,
+               h2idp.subscribe as idpsubscribe,
+               idp.name as idpname,
+               h2sp.publish as sppublish,
+               h2sp.subscribe as spsubscribe,
+               sp.name as spname
+           FROM
+               {mnet_host} h
+           LEFT JOIN
+               {mnet_host2service} h2idp
+           ON
+              (h.id = h2idp.hostid AND
+              (h2idp.publish = 1 OR
+               h2idp.subscribe = 1))
+           INNER JOIN
+               {mnet_service} idp
+           ON
+              (h2idp.serviceid = idp.id AND
+               idp.name = 'sso_idp')
+           LEFT JOIN
+               {mnet_host2service} h2sp
+           ON
+              (h.id = h2sp.hostid AND
+              (h2sp.publish = 1 OR
+               h2sp.subscribe = 1))
+           INNER JOIN
+               {mnet_service} sp
+           ON
+              (h2sp.serviceid = sp.id AND
+               sp.name = 'sso_sp')
+           WHERE
+              ((h2idp.publish = 1 AND h2sp.subscribe = 1) OR
+              (h2sp.publish = 1 AND h2idp.subscribe = 1)) AND
+               h.id != ?
+           ORDER BY
+               h.name ASC";
+
+        $idproviders = array();
+        $serviceproviders = array();
+        if ($resultset = $DB->get_records_sql($query, array($CFG->mnet_localhost_id))) {
+            foreach ($resultset as $hostservice) {
+                if (!empty($hostservice->idppublish) && !empty($hostservice->spsubscribe)) {
+                    $serviceproviders[] = array('id' => $hostservice->id,
+                        'name' => $hostservice->hostname,
+                        'wwwroot' => $hostservice->wwwroot);
+                }
+                if (!empty($hostservice->idpsubscribe) && !empty($hostservice->sppublish)) {
+                    $idproviders[] = array('id' => $hostservice->id,
+                        'name' => $hostservice->hostname,
+                        'wwwroot' => $hostservice->wwwroot);
+                }
+            }
+        }
+
+        // ID Providers.
+        $table = html_writer::start_tag('table', array('class' => 'generaltable'));
+
+        $count = 0;
+        foreach ($idproviders as $host) {
+            $table .= html_writer::start_tag('tr');
+            $table .= html_writer::start_tag('td');
+            $table .= $host['name'];
+            $table .= html_writer::end_tag('td');
+            $table .= html_writer::start_tag('td');
+            $table .= $host['wwwroot'];
+            $table .= html_writer::end_tag('td');
+            $table .= html_writer::end_tag('tr');
+            $count++;
+        }
+            $table .= html_writer::end_tag('table');
+
+        if ($count > 0) {
+            echo html_writer::tag('h3', get_string('auth_mnet_roamin', 'auth_mnet'));
+            echo $table;
+        }
+
+        // Service Providers.
+        unset($table);
+        $table = html_writer::start_tag('table', array('class' => 'generaltable'));
+        $count = 0;
+        foreach ($serviceproviders as $host) {
+            $table .= html_writer::start_tag('tr');
+            $table .= html_writer::start_tag('td');
+            $table .= $host['name'];
+            $table .= html_writer::end_tag('td');
+            $table .= html_writer::start_tag('td');
+            $table .= $host['wwwroot'];
+            $table .= html_writer::end_tag('td');
+            $table .= html_writer::end_tag('tr');
+            $count++;
+        }
+            $table .= html_writer::end_tag('table');
+        if ($count > 0) {
+            echo html_writer::tag('h3', get_string('auth_mnet_roamout', 'auth_mnet'));
+            echo $table;
+        }
     }
 }

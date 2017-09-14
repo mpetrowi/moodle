@@ -25,13 +25,10 @@
  */
 
 require('../config.php');
+require_once($CFG->dirroot . '/user/editlib.php');
+require_once($CFG->libdir . '/authlib.php');
 
-if (empty($CFG->registerauth)) {
-    print_error('notlocalisederrormessage', 'error', '', 'Sorry, you may not use this page.');
-}
-$authplugin = get_auth_plugin($CFG->registerauth);
-
-if (!$authplugin->can_signup()) {
+if (!$authplugin = signup_is_enabled()) {
     print_error('notlocalisederrormessage', 'error', '', 'Sorry, you may not use this page.');
 }
 
@@ -41,19 +38,38 @@ $PAGE->https_required();
 $PAGE->set_url('/login/signup.php');
 $PAGE->set_context(context_system::instance());
 
+// If wantsurl is empty or /login/signup.php, override wanted URL.
+// We do not want to end up here again if user clicks "Login".
+if (empty($SESSION->wantsurl)) {
+    $SESSION->wantsurl = $CFG->wwwroot . '/';
+} else {
+    $wantsurl = new moodle_url($SESSION->wantsurl);
+    if ($PAGE->url->compare($wantsurl, URL_MATCH_BASE)) {
+        $SESSION->wantsurl = $CFG->wwwroot . '/';
+    }
+}
+
+if (isloggedin() and !isguestuser()) {
+    // Prevent signing up when already logged in.
+    echo $OUTPUT->header();
+    echo $OUTPUT->box_start();
+    $logout = new single_button(new moodle_url($CFG->httpswwwroot . '/login/logout.php',
+        array('sesskey' => sesskey(), 'loginpage' => 1)), get_string('logout'), 'post');
+    $continue = new single_button(new moodle_url('/'), get_string('cancel'), 'get');
+    echo $OUTPUT->confirm(get_string('cannotsignup', 'error', fullname($USER)), $logout, $continue);
+    echo $OUTPUT->box_end();
+    echo $OUTPUT->footer();
+    exit;
+}
+
 $mform_signup = $authplugin->signup_form();
 
 if ($mform_signup->is_cancelled()) {
     redirect(get_login_url());
 
 } else if ($user = $mform_signup->get_data()) {
-    $user->confirmed   = 0;
-    $user->lang        = current_language();
-    $user->firstaccess = time();
-    $user->timecreated = time();
-    $user->mnethostid  = $CFG->mnet_localhost_id;
-    $user->secret      = random_string(15);
-    $user->auth        = $CFG->registerauth;
+    // Add missing required fields.
+    $user = signup_setup_new_user($user);
 
     $authplugin->user_signup($user, true); // prints notice and link to login/index.php
     exit; //never reached
@@ -69,9 +85,23 @@ $login      = get_string('login');
 $PAGE->navbar->add($login);
 $PAGE->navbar->add($newaccount);
 
+$PAGE->set_pagelayout('login');
 $PAGE->set_title($newaccount);
 $PAGE->set_heading($SITE->fullname);
 
 echo $OUTPUT->header();
-$mform_signup->display();
+
+if ($mform_signup instanceof renderable) {
+    // Try and use the renderer from the auth plugin if it exists.
+    try {
+        $renderer = $PAGE->get_renderer('auth_' . $authplugin->authtype);
+    } catch (coding_exception $ce) {
+        // Fall back on the general renderer.
+        $renderer = $OUTPUT;
+    }
+    echo $renderer->render($mform_signup);
+} else {
+    // Fall back for auth plugins not using renderables.
+    $mform_signup->display();
+}
 echo $OUTPUT->footer();

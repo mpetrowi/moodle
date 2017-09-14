@@ -17,8 +17,7 @@
 /**
  * Provides support for the conversion of moodle1 backup to the moodle2 format
  *
- * @package    mod
- * @subpackage feedback
+ * @package    mod_feedback
  * @copyright  2011 Rossiani Wijaya <rwijaya@moodle.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -86,11 +85,15 @@ class moodle1_mod_feedback_handler extends moodle1_mod_handler {
      * data available
      */
     public function process_feedback($data) {
+        global $CFG;
+
         // get the course module id and context id
         $instanceid     = $data['id'];
         $cminfo         = $this->get_cminfo($instanceid);
         $this->moduleid = $cminfo['id'];
         $contextid      = $this->converter->get_contextid(CONTEXT_MODULE, $this->moduleid);
+
+
 
         // get a fresh new file manager for this instance
         $this->fileman = $this->converter->get_file_manager($contextid, 'mod_feedback');
@@ -99,6 +102,12 @@ class moodle1_mod_feedback_handler extends moodle1_mod_handler {
         $this->fileman->filearea = 'intro';
         $this->fileman->itemid   = 0;
         $data['intro'] = moodle1_converter::migrate_referenced_files($data['intro'], $this->fileman);
+
+        // Convert the introformat if necessary.
+        if ($CFG->texteditors !== 'textarea') {
+            $data['intro'] = text_to_html($data['intro'], false, false, true);
+            $data['introformat'] = FORMAT_HTML;
+        }
 
         // start writing feedback.xml
         $this->open_xml_writer("activities/feedback_{$this->moduleid}/feedback.xml");

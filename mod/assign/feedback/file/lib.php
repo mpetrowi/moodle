@@ -1,4 +1,4 @@
-<?PHP
+<?php
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -32,9 +32,16 @@ defined('MOODLE_INTERNAL') || die();
  * @param string $filearea
  * @param array $args
  * @param bool $forcedownload
+ * @param array $options - List of options affecting file serving.
  * @return bool false if file not found, does not return if found - just send the file
  */
-function assignfeedback_file_pluginfile($course, $cm, context $context, $filearea, $args, $forcedownload) {
+function assignfeedback_file_pluginfile($course,
+                                        $cm,
+                                        context $context,
+                                        $filearea,
+                                        $args,
+                                        $forcedownload,
+                                        array $options=array()) {
     global $USER, $DB;
 
     if ($context->contextlevel != CONTEXT_MODULE) {
@@ -46,7 +53,6 @@ function assignfeedback_file_pluginfile($course, $cm, context $context, $fileare
     $record = $DB->get_record('assign_grades', array('id'=>$itemid), 'userid,assignment', MUST_EXIST);
     $userid = $record->userid;
 
-
     if (!$assign = $DB->get_record('assign', array('id'=>$cm->instance))) {
         return false;
     }
@@ -55,8 +61,7 @@ function assignfeedback_file_pluginfile($course, $cm, context $context, $fileare
         return false;
     }
 
-
-    // check is users feedback or has grading permission
+    // Check is users feedback or has grading permission.
     if ($USER->id != $userid and !has_capability('mod/assign:grade', $context)) {
         return false;
     }
@@ -69,5 +74,6 @@ function assignfeedback_file_pluginfile($course, $cm, context $context, $fileare
     if (!$file = $fs->get_file_by_hash(sha1($fullpath)) or $file->is_directory()) {
         return false;
     }
-    send_stored_file($file, 0, 0, true); // download MUST be forced - security!
+    // Download MUST be forced - security!
+    send_stored_file($file, 0, 0, true, $options);
 }

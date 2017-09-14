@@ -18,7 +18,7 @@
 /**
  * The Web service script that is called from the filepicker front end
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository
  * @copyright  2009 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -26,9 +26,9 @@
 
 define('AJAX_SCRIPT', true);
 
-require_once(dirname(dirname(__FILE__)).'/config.php');
-require_once(dirname(dirname(__FILE__)).'/lib/filelib.php');
-require_once(dirname(__FILE__).'/lib.php');
+require_once(__DIR__ . '/../config.php');
+require_once(__DIR__ . '/../lib/filelib.php');
+require_once(__DIR__.'/lib.php');
 
 $err = new stdClass();
 
@@ -46,17 +46,18 @@ $maxbytes  = optional_param('maxbytes', 0, PARAM_INT);          // Maxbytes
 $req_path  = optional_param('p', '', PARAM_RAW);                // Path
 $accepted_types  = optional_param_array('accepted_types', '*', PARAM_RAW);
 $saveas_filename = optional_param('title', '', PARAM_FILE);     // save as file name
+$areamaxbytes  = optional_param('areamaxbytes', FILE_AREA_MAX_BYTES_UNLIMITED, PARAM_INT); // Area max bytes.
 $saveas_path   = optional_param('savepath', '/', PARAM_PATH);   // save as file path
 $search_text   = optional_param('s', '', PARAM_CLEANHTML);
 $linkexternal  = optional_param('linkexternal', '', PARAM_ALPHA);
 $usefilereference  = optional_param('usefilereference', false, PARAM_BOOL);
+$usecontrolledlink  = optional_param('usecontrolledlink', false, PARAM_BOOL);
 
 list($context, $course, $cm) = get_context_info_array($contextid);
-require_login($course, false, $cm);
+require_login($course, false, $cm, false, true);
 $PAGE->set_context($context);
 
 echo $OUTPUT->header(); // send headers
-@header('Content-type: text/html; charset=utf-8');
 
 // If uploaded file is larger than post_max_size (php.ini) setting, $_POST content will be empty.
 if (empty($_POST) && !empty($action)) {
@@ -74,6 +75,8 @@ $repooptions = array(
     'ajax' => true,
     'mimetypes' => $accepted_types
 );
+
+ajax_capture_output();
 $repo = repository::get_repository_by_id($repo_id, $contextid, $repooptions);
 
 // Check permissions
@@ -87,37 +90,7 @@ if (!empty($course)) {
 $maxbytes = get_user_max_upload_file_size($context, $CFG->maxbytes, $coursemaxbytes, $maxbytes);
 
 // Wait as long as it takes for this script to finish
-set_time_limit(0);
-
-// Early actions which need to be done before repository instances initialised
-switch ($action) {
-    // global search
-    case 'gsearch':
-        $params = array();
-        $params['context'] = array(context::instance_by_id($contextid), get_system_context());
-        $params['currentcontext'] = context::instance_by_id($contextid);
-        $repos = repository::get_instances($params);
-        $list = array();
-        foreach($repos as $repo){
-            if ($repo->global_search()) {
-                $ret = $repo->search($search_text);
-                array_walk($ret['list'], 'repository_attach_id', $repo->id);  // See function below
-                $tmp = array_merge($list, $ret['list']);
-                $list = $tmp;
-            }
-        }
-        $listing = array('list'=>$list);
-        $listing['gsearch'] = true;
-        die(json_encode($listing));
-        break;
-
-    // remove the cache files & logout
-    case 'ccache':
-        $cache = new curl_cache;
-        $cache->refresh();
-        $action = 'list';
-        break;
-}
+core_php_time_limit::raise();
 
 // These actions all occur on the currently active repository instance
 switch ($action) {
@@ -127,6 +100,7 @@ switch ($action) {
         if ($repo->check_login()) {
             $listing = repository::prepare_listing($repo->get_listing($req_path, $page));
             $listing['repo_id'] = $repo_id;
+            ajax_check_captured_output();
             echo json_encode($listing);
             break;
         } else {
@@ -135,23 +109,27 @@ switch ($action) {
     case 'login':
         $listing = $repo->print_login();
         $listing['repo_id'] = $repo_id;
+        ajax_check_captured_output();
         echo json_encode($listing);
         break;
     case 'logout':
         $logout = $repo->logout();
         $logout['repo_id'] = $repo_id;
+        ajax_check_captured_output();
         echo json_encode($logout);
         break;
     case 'searchform':
         $search_form['repo_id'] = $repo_id;
         $search_form['form'] = $repo->print_search();
         $search_form['allowcaching'] = true;
+        ajax_check_captured_output();
         echo json_encode($search_form);
         break;
     case 'search':
         $search_result = repository::prepare_listing($repo->search($search_text, (int)$page));
         $search_result['repo_id'] = $repo_id;
         $search_result['issearchresult'] = true;
+        ajax_check_captured_output();
         echo json_encode($search_result);
         break;
     case 'download':
@@ -190,6 +168,7 @@ switch ($action) {
             $info['file'] = $saveas_filename;
             $info['type'] = 'link';
             $info['url'] = $link;
+            ajax_check_captured_output();
             echo json_encode($info);
             die;
         } else {
@@ -230,7 +209,7 @@ switch ($action) {
             // note that in this case user may not have permission to access the source file directly
             // so no file_browser/file_info can be used below
             if ($repo->has_moodle_files()) {
-                $file = repository::get_moodle_file($source);
+                $file = repository::get_moodle_file($reference);
                 if ($file && $file->is_external_file()) {
                     $sourcefield = $file->get_source(); // remember the original source
                     $record->source = $repo::build_source_field($sourcefield);
@@ -242,12 +221,13 @@ switch ($action) {
                 }
             }
 
-            if ($usefilereference) {
+            if ($usefilereference || $usecontrolledlink) {
                 if ($repo->has_moodle_files()) {
                     $sourcefile = repository::get_moodle_file($reference);
                     $record->contenthash = $sourcefile->get_contenthash();
                     $record->filesize = $sourcefile->get_filesize();
                 }
+
                 // Check if file exists.
                 if (repository::draftfile_exists($itemid, $saveas_path, $saveas_filename)) {
                     // File name being used, rename it.
@@ -266,7 +246,7 @@ switch ($action) {
                     $event['existingfile'] = new stdClass;
                     $event['existingfile']->filepath = $saveas_path;
                     $event['existingfile']->filename = $saveas_filename;
-                    $event['existingfile']->url      = moodle_url::make_draftfile_url($itemid, $saveas_path, $saveas_filename)->out();;
+                    $event['existingfile']->url      = moodle_url::make_draftfile_url($itemid, $saveas_path, $saveas_filename)->out();
                 } else {
 
                     $storedfile = $fs->create_file_from_reference($record, $repo_id, $reference);
@@ -274,13 +254,14 @@ switch ($action) {
                         'url'=>moodle_url::make_draftfile_url($storedfile->get_itemid(), $storedfile->get_filepath(), $storedfile->get_filename())->out(),
                         'id'=>$storedfile->get_itemid(),
                         'file'=>$storedfile->get_filename(),
-                        'icon' => $OUTPUT->pix_url(file_file_icon($storedfile, 32))->out(),
+                        'icon' => $OUTPUT->image_url(file_file_icon($storedfile, 32))->out(),
                     );
                 }
                 // Repository plugin callback
                 // You can cache reository file in this callback
                 // or complete other tasks.
                 $repo->cache_file_by_reference($reference, $storedfile);
+                ajax_check_captured_output();
                 echo json_encode($event);
                 die;
             } else if ($repo->has_moodle_files()) {
@@ -289,13 +270,18 @@ switch ($action) {
 
                 // If the moodle file is an alias we copy this alias, otherwise we copy the file
                 // {@link repository::copy_to_area()}.
-                $fileinfo = $repo->copy_to_area($reference, $record, $maxbytes);
+                $fileinfo = $repo->copy_to_area($reference, $record, $maxbytes, $areamaxbytes);
 
+                ajax_check_captured_output();
                 echo json_encode($fileinfo);
                 die;
             } else {
                 // Download file to moodle.
                 $downloadedfile = $repo->get_file($reference, $saveas_filename);
+
+                if (!empty($downloadedfile['newfilename'])) {
+                    $record->filename = $downloadedfile['newfilename'];
+                }
                 if (empty($downloadedfile['path'])) {
                     $err->error = get_string('cannotdownload', 'repository');
                     die(json_encode($err));
@@ -303,7 +289,14 @@ switch ($action) {
 
                 // Check if exceed maxbytes.
                 if ($maxbytes != -1 && filesize($downloadedfile['path']) > $maxbytes) {
-                    throw new file_exception('maxbytes');
+                    $maxbytesdisplay = display_size($maxbytes);
+                    throw new file_exception('maxbytesfile', (object) array('file' => $record->filename,
+                                                                            'size' => $maxbytesdisplay));
+                }
+
+                // Check if we exceed the max bytes of the area.
+                if (file_is_draft_area_limit_reached($itemid, $areamaxbytes, filesize($downloadedfile['path']))) {
+                    throw new file_exception('maxareabytes');
                 }
 
                 $info = repository::move_to_filepool($downloadedfile['path'], $record);
@@ -311,12 +304,14 @@ switch ($action) {
                     $info['e'] = get_string('error', 'moodle');
                 }
             }
+            ajax_check_captured_output();
             echo json_encode($info);
             die;
         }
         break;
     case 'upload':
         $result = $repo->upload($saveas_filename, $maxbytes);
+        ajax_check_captured_output();
         echo json_encode($result);
         break;
 
@@ -329,6 +324,7 @@ switch ($action) {
         $newfilename = required_param('newfilename', PARAM_FILE);
 
         $info = repository::overwrite_existing_draftfile($itemid, $filepath, $filename, $newfilepath, $newfilename);
+        ajax_check_captured_output();
         echo json_encode($info);
         break;
 
@@ -336,6 +332,7 @@ switch ($action) {
         // delete tmp file
         $newfilepath = required_param('newfilepath', PARAM_PATH);
         $newfilename = required_param('newfilename', PARAM_FILE);
+        ajax_check_captured_output();
         echo json_encode(repository::delete_tempfile_from_draft($itemid, $newfilepath, $newfilename));
 
         break;

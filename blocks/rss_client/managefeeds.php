@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -18,12 +17,12 @@
 /**
  * Script to let a user manage their RSS feeds.
  *
- * @package   moodlecore
+ * @package   block_rss_client
  * @copyright 2009 Tim Hunt
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(__FILE__) . '/../../config.php');
+require_once(__DIR__ . '/../../config.php');
 require_once($CFG->libdir . '/tablelib.php');
 
 require_login();
@@ -83,10 +82,9 @@ $PAGE->set_pagelayout('standard');
 $PAGE->set_title($strmanage);
 $PAGE->set_heading($strmanage);
 
-$settingsurl = new moodle_url('/admin/settings.php?section=blocksettingrss_client');
 $managefeeds = new moodle_url('/blocks/rss_client/managefeeds.php', $urlparams);
 $PAGE->navbar->add(get_string('blocks'));
-$PAGE->navbar->add(get_string('pluginname', 'block_rss_client'), $settingsurl);
+$PAGE->navbar->add(get_string('pluginname', 'block_rss_client'));
 $PAGE->navbar->add(get_string('managefeeds', 'block_rss_client'), $managefeeds);
 echo $OUTPUT->header();
 
@@ -116,6 +114,13 @@ foreach($feeds as $feed) {
     $feedinfo = '<div class="title">' . $viewlink . '</div>' .
         '<div class="url">' . html_writer::link($feed->url, $feed->url) .'</div>' .
         '<div class="description">' . $feed->description . '</div>';
+    if ($feed->skipuntil) {
+        $skipuntil = userdate($feed->skipuntil, get_string('strftimedatetime', 'langconfig'));
+        $skipmsg = get_string('failedfeed', 'block_rss_client', $skipuntil);
+        $notification = new \core\output\notification($skipmsg, 'error');
+        $notification->set_show_closebutton(false);
+        $feedinfo .= $OUTPUT->render($notification);
+    }
 
     $editurl = new moodle_url('/blocks/rss_client/editfeed.php?rssid=' . $feed->id . $extraparams);
     $editaction = $OUTPUT->action_icon($editurl, new pix_icon('t/edit', get_string('edit')));

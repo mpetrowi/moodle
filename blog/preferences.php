@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -28,6 +27,7 @@
 require_once('../config.php');
 require_once($CFG->dirroot.'/blog/lib.php');
 require_once('preferences_form.php');
+require_once($CFG->dirroot.'/user/editlib.php');
 
 $courseid = optional_param('courseid', SITEID, PARAM_INT);
 $modid    = optional_param('modid', null, PARAM_INT);
@@ -53,24 +53,25 @@ if ($groupid !== null) {
 }
 
 $PAGE->set_url($url);
-$PAGE->set_pagelayout('standard');
+$PAGE->set_pagelayout('admin');
 
-if ($courseid == SITEID) {
-    require_login();
-    $context = context_system::instance();
-    $PAGE->set_context($context);
-} else {
-    require_login($courseid);
-    $context = context_course::instance($courseid);
-}
+$sitecontext = context_system::instance();
+$usercontext = context_user::instance($USER->id);
+$PAGE->set_context($usercontext);
+require_login($courseid);
 
 if (empty($CFG->enableblogs)) {
     print_error('blogdisable', 'blog');
 }
 
-require_capability('moodle/blog:view', $context);
+if (isguestuser()) {
+    print_error('noguest');
+}
 
-/// If data submitted, then process and store.
+// The preference is site wide not blog specific. Hence user should have permissions in site level.
+require_capability('moodle/blog:view', $sitecontext);
+
+// If data submitted, then process and store.
 
 $mform = new blog_preferences_form('preferences.php');
 $mform->set_data(array('pagesize' => get_user_preferences('blogpagesize')));
@@ -81,11 +82,12 @@ if (!$mform->is_cancelled() && $data = $mform->get_data()) {
     if ($pagesize < 1) {
         print_error('invalidpagesize');
     }
-    set_user_preference('blogpagesize', $pagesize);
+    useredit_update_user_preference(['id' => $USER->id,
+        'preference_blogpagesize' => $pagesize]);
 }
 
-if ($mform->is_cancelled()){
-    redirect($CFG->wwwroot . '/blog/index.php');
+if ($mform->is_cancelled()) {
+    redirect($CFG->wwwroot . '/user/preferences.php');
 }
 
 $site = get_site();
@@ -95,7 +97,7 @@ $strblogs       = get_string('blogs', 'blog');
 
 $title = "$site->shortname: $strblogs : $strpreferences";
 $PAGE->set_title($title);
-$PAGE->set_heading($title);
+$PAGE->set_heading(fullname($USER));
 
 echo $OUTPUT->header();
 

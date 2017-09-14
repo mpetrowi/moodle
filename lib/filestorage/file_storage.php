@@ -43,50 +43,53 @@ require_once("$CFG->libdir/filestorage/stored_file.php");
  * @since     Moodle 2.0
  */
 class file_storage {
-    /** @var string Directory with file contents */
-    private $filedir;
-    /** @var string Contents of deleted files not needed any more */
-    private $trashdir;
+
     /** @var string tempdir */
     private $tempdir;
-    /** @var int Permissions for new directories */
-    private $dirpermissions;
-    /** @var int Permissions for new files */
-    private $filepermissions;
+
+    /** @var file_system filesystem */
+    private $filesystem;
 
     /**
      * Constructor - do not use directly use {@link get_file_storage()} call instead.
-     *
-     * @param string $filedir full path to pool directory
-     * @param string $trashdir temporary storage of deleted area
-     * @param string $tempdir temporary storage of various files
-     * @param int $dirpermissions new directory permissions
-     * @param int $filepermissions new file permissions
      */
-    public function __construct($filedir, $trashdir, $tempdir, $dirpermissions, $filepermissions) {
-        $this->filedir         = $filedir;
-        $this->trashdir        = $trashdir;
-        $this->tempdir         = $tempdir;
-        $this->dirpermissions  = $dirpermissions;
-        $this->filepermissions = $filepermissions;
+    public function __construct() {
+        // The tempdir must always remain on disk, but shared between all ndoes in a cluster. Its content is not subject
+        // to the file_system abstraction.
+        $this->tempdir = make_temp_directory('filestorage');
 
-        // make sure the file pool directory exists
-        if (!is_dir($this->filedir)) {
-            if (!mkdir($this->filedir, $this->dirpermissions, true)) {
-                throw new file_exception('storedfilecannotcreatefiledirs'); // permission trouble
+        $this->setup_file_system();
+    }
+
+    /**
+     * Complete setup procedure for the file_system component.
+     *
+     * @return file_system
+     */
+    public function setup_file_system() {
+        global $CFG;
+        if ($this->filesystem === null) {
+            require_once($CFG->libdir . '/filestorage/file_system.php');
+            if (!empty($CFG->alternative_file_system_class)) {
+                $class = $CFG->alternative_file_system_class;
+            } else {
+                // The default file_system is the filedir.
+                require_once($CFG->libdir . '/filestorage/file_system_filedir.php');
+                $class = file_system_filedir::class;
             }
-            // place warning file in file pool root
-            if (!file_exists($this->filedir.'/warning.txt')) {
-                file_put_contents($this->filedir.'/warning.txt',
-                                  'This directory contains the content of uploaded files and is controlled by Moodle code. Do not manually move, change or rename any of the files and subdirectories here.');
-            }
+            $this->filesystem = new $class();
         }
-        // make sure the file pool directory exists
-        if (!is_dir($this->trashdir)) {
-            if (!mkdir($this->trashdir, $this->dirpermissions, true)) {
-                throw new file_exception('storedfilecannotcreatefiledirs'); // permission trouble
-            }
-        }
+
+        return $this->filesystem;
+    }
+
+    /**
+     * Return the file system instance.
+     *
+     * @return file_system
+     */
+    public function get_file_system() {
+        return $this->filesystem;
     }
 
     /**
@@ -149,8 +152,73 @@ class file_storage {
      * @return stored_file instance of file abstraction class
      */
     public function get_file_instance(stdClass $filerecord) {
-        $storedfile = new stored_file($this, $filerecord, $this->filedir);
+        $storedfile = new stored_file($this, $filerecord);
         return $storedfile;
+    }
+
+    /**
+     * Get converted document.
+     *
+     * Get an alternate version of the specified document, if it is possible to convert.
+     *
+     * @param stored_file $file the file we want to preview
+     * @param string $format The desired format - e.g. 'pdf'. Formats are specified by file extension.
+     * @param boolean $forcerefresh If true, the file will be converted every time (not cached).
+     * @return stored_file|bool false if unable to create the conversion, stored file otherwise
+     */
+    public function get_converted_document(stored_file $file, $format, $forcerefresh = false) {
+        debugging('The get_converted_document function has been deprecated and the unoconv functions been removed. '
+                . 'The file has not been converted. '
+                . 'Please update your code to use the file conversion API instead.', DEBUG_DEVELOPER);
+
+        return false;
+    }
+
+    /**
+     * Verify the format is supported.
+     *
+     * @param string $format The desired format - e.g. 'pdf'. Formats are specified by file extension.
+     * @return bool - True if the format is supported for input.
+     */
+    protected function is_format_supported_by_unoconv($format) {
+        debugging('The is_format_supported_by_unoconv function has been deprecated and the unoconv functions been removed. '
+                . 'Please update your code to use the file conversion API instead.', DEBUG_DEVELOPER);
+
+        return false;
+    }
+
+    /**
+     * Check if the installed version of unoconv is supported.
+     *
+     * @return bool true if the present version is supported, false otherwise.
+     */
+    public static function can_convert_documents() {
+        debugging('The can_convert_documents function has been deprecated and the unoconv functions been removed. '
+                . 'Please update your code to use the file conversion API instead.', DEBUG_DEVELOPER);
+
+        return false;
+    }
+
+    /**
+     * Regenerate the test pdf and send it direct to the browser.
+     */
+    public static function send_test_pdf() {
+        debugging('The send_test_pdf function has been deprecated and the unoconv functions been removed. '
+                . 'Please update your code to use the file conversion API instead.', DEBUG_DEVELOPER);
+
+        return false;
+    }
+
+    /**
+     * Check if unoconv configured path is correct and working.
+     *
+     * @return \stdClass an object with the test status and the UNOCONVPATH_ constant message.
+     */
+    public static function test_unoconv_path() {
+        debugging('The test_unoconv_path function has been deprecated and the unoconv functions been removed. '
+                . 'Please update your code to use the file conversion API instead.', DEBUG_DEVELOPER);
+
+        return false;
     }
 
     /**
@@ -181,6 +249,154 @@ class file_storage {
     }
 
     /**
+     * Return an available file name.
+     *
+     * This will return the next available file name in the area, adding/incrementing a suffix
+     * of the file, ie: file.txt > file (1).txt > file (2).txt > etc...
+     *
+     * If the file name passed is available without modification, it is returned as is.
+     *
+     * @param int $contextid context ID.
+     * @param string $component component.
+     * @param string $filearea file area.
+     * @param int $itemid area item ID.
+     * @param string $filepath the file path.
+     * @param string $filename the file name.
+     * @return string available file name.
+     * @throws coding_exception if the file name is invalid.
+     * @since Moodle 2.5
+     */
+    public function get_unused_filename($contextid, $component, $filearea, $itemid, $filepath, $filename) {
+        global $DB;
+
+        // Do not accept '.' or an empty file name (zero is acceptable).
+        if ($filename == '.' || (empty($filename) && !is_numeric($filename))) {
+            throw new coding_exception('Invalid file name passed', $filename);
+        }
+
+        // The file does not exist, we return the same file name.
+        if (!$this->file_exists($contextid, $component, $filearea, $itemid, $filepath, $filename)) {
+            return $filename;
+        }
+
+        // Trying to locate a file name using the used pattern. We remove the used pattern from the file name first.
+        $pathinfo = pathinfo($filename);
+        $basename = $pathinfo['filename'];
+        $matches = array();
+        if (preg_match('~^(.+) \(([0-9]+)\)$~', $basename, $matches)) {
+            $basename = $matches[1];
+        }
+
+        $filenamelike = $DB->sql_like_escape($basename) . ' (%)';
+        if (isset($pathinfo['extension'])) {
+            $filenamelike .= '.' . $DB->sql_like_escape($pathinfo['extension']);
+        }
+
+        $filenamelikesql = $DB->sql_like('f.filename', ':filenamelike');
+        $filenamelen = $DB->sql_length('f.filename');
+        $sql = "SELECT filename
+                FROM {files} f
+                WHERE
+                    f.contextid = :contextid AND
+                    f.component = :component AND
+                    f.filearea = :filearea AND
+                    f.itemid = :itemid AND
+                    f.filepath = :filepath AND
+                    $filenamelikesql
+                ORDER BY
+                    $filenamelen DESC,
+                    f.filename DESC";
+        $params = array('contextid' => $contextid, 'component' => $component, 'filearea' => $filearea, 'itemid' => $itemid,
+                'filepath' => $filepath, 'filenamelike' => $filenamelike);
+        $results = $DB->get_fieldset_sql($sql, $params, IGNORE_MULTIPLE);
+
+        // Loop over the results to make sure we are working on a valid file name. Because 'file (1).txt' and 'file (copy).txt'
+        // would both be returned, but only the one only containing digits should be used.
+        $number = 1;
+        foreach ($results as $result) {
+            $resultbasename = pathinfo($result, PATHINFO_FILENAME);
+            $matches = array();
+            if (preg_match('~^(.+) \(([0-9]+)\)$~', $resultbasename, $matches)) {
+                $number = $matches[2] + 1;
+                break;
+            }
+        }
+
+        // Constructing the new filename.
+        $newfilename = $basename . ' (' . $number . ')';
+        if (isset($pathinfo['extension'])) {
+            $newfilename .= '.' . $pathinfo['extension'];
+        }
+
+        return $newfilename;
+    }
+
+    /**
+     * Return an available directory name.
+     *
+     * This will return the next available directory name in the area, adding/incrementing a suffix
+     * of the last portion of path, ie: /path/ > /path (1)/ > /path (2)/ > etc...
+     *
+     * If the file path passed is available without modification, it is returned as is.
+     *
+     * @param int $contextid context ID.
+     * @param string $component component.
+     * @param string $filearea file area.
+     * @param int $itemid area item ID.
+     * @param string $suggestedpath the suggested file path.
+     * @return string available file path
+     * @since Moodle 2.5
+     */
+    public function get_unused_dirname($contextid, $component, $filearea, $itemid, $suggestedpath) {
+        global $DB;
+
+        // Ensure suggestedpath has trailing '/'
+        $suggestedpath = rtrim($suggestedpath, '/'). '/';
+
+        // The directory does not exist, we return the same file path.
+        if (!$this->file_exists($contextid, $component, $filearea, $itemid, $suggestedpath, '.')) {
+            return $suggestedpath;
+        }
+
+        // Trying to locate a file path using the used pattern. We remove the used pattern from the path first.
+        if (preg_match('~^(/.+) \(([0-9]+)\)/$~', $suggestedpath, $matches)) {
+            $suggestedpath = $matches[1]. '/';
+        }
+
+        $filepathlike = $DB->sql_like_escape(rtrim($suggestedpath, '/')) . ' (%)/';
+
+        $filepathlikesql = $DB->sql_like('f.filepath', ':filepathlike');
+        $filepathlen = $DB->sql_length('f.filepath');
+        $sql = "SELECT filepath
+                FROM {files} f
+                WHERE
+                    f.contextid = :contextid AND
+                    f.component = :component AND
+                    f.filearea = :filearea AND
+                    f.itemid = :itemid AND
+                    f.filename = :filename AND
+                    $filepathlikesql
+                ORDER BY
+                    $filepathlen DESC,
+                    f.filepath DESC";
+        $params = array('contextid' => $contextid, 'component' => $component, 'filearea' => $filearea, 'itemid' => $itemid,
+                'filename' => '.', 'filepathlike' => $filepathlike);
+        $results = $DB->get_fieldset_sql($sql, $params, IGNORE_MULTIPLE);
+
+        // Loop over the results to make sure we are working on a valid file path. Because '/path (1)/' and '/path (copy)/'
+        // would both be returned, but only the one only containing digits should be used.
+        $number = 1;
+        foreach ($results as $result) {
+            if (preg_match('~ \(([0-9]+)\)/$~', $result, $matches)) {
+                $number = (int)($matches[1]) + 1;
+                break;
+            }
+        }
+
+        return rtrim($suggestedpath, '/'). ' (' . $number . ')/';
+    }
+
+    /**
      * Generates a preview image for the stored file
      *
      * @param stored_file $file the file we want to preview
@@ -204,16 +420,7 @@ class file_storage {
             return false;
         }
 
-        // getimagesizefromstring() is available from PHP 5.4 but we need to support
-        // lower versions, so...
-        $tmproot = make_temp_directory('thumbnails');
-        $tmpfilepath = $tmproot.'/'.$file->get_contenthash().'_'.$mode;
-        file_put_contents($tmpfilepath, $data);
-        $imageinfo = getimagesize($tmpfilepath);
-        unlink($tmpfilepath);
-
         $context = context_system::instance();
-
         $record = array(
             'contextid' => $context->id,
             'component' => 'core',
@@ -223,6 +430,7 @@ class file_storage {
             'filename'  => $file->get_contenthash(),
         );
 
+        $imageinfo = getimagesizefromstring($data);
         if ($imageinfo) {
             $record['mimetype'] = $imageinfo['mime'];
         }
@@ -241,21 +449,18 @@ class file_storage {
         global $CFG;
         require_once($CFG->libdir.'/gdlib.php');
 
-        $tmproot = make_temp_directory('thumbnails');
-        $tmpfilepath = $tmproot.'/'.$file->get_contenthash();
-        $file->copy_content_to($tmpfilepath);
-
         if ($mode === 'tinyicon') {
-            $data = generate_image_thumbnail($tmpfilepath, 24, 24);
+            $data = $file->generate_image_thumbnail(24, 24);
 
         } else if ($mode === 'thumb') {
-            $data = generate_image_thumbnail($tmpfilepath, 90, 90);
+            $data = $file->generate_image_thumbnail(90, 90);
+
+        } else if ($mode === 'bigthumb') {
+            $data = $file->generate_image_thumbnail(250, 250);
 
         } else {
             throw new file_exception('storedfileproblem', 'Invalid preview mode requested');
         }
-
-        unlink($tmpfilepath);
 
         return $data;
     }
@@ -368,7 +573,7 @@ class file_storage {
      * @param int $repositoryid
      * @param string $sort A fragment of SQL to use for sorting
      */
-    public function get_external_files($repositoryid, $sort = 'sortorder, itemid, filepath, filename') {
+    public function get_external_files($repositoryid, $sort = '') {
         global $DB;
         $sql = "SELECT ".self::instance_sql_fields('f', 'r')."
                   FROM {files} f
@@ -392,21 +597,46 @@ class file_storage {
      *
      * @param int $contextid context ID
      * @param string $component component
-     * @param string $filearea file area
+     * @param mixed $filearea file area/s, you cannot specify multiple fileareas as well as an itemid
      * @param int $itemid item ID or all files if not specified
      * @param string $sort A fragment of SQL to use for sorting
      * @param bool $includedirs whether or not include directories
-     * @return array of stored_files indexed by pathanmehash
+     * @param int $updatedsince return files updated since this time
+     * @param int $limitfrom return a subset of records, starting at this point (optional).
+     * @param int $limitnum return a subset comprising this many records in total (optional, required if $limitfrom is set).
+     * @return stored_file[] array of stored_files indexed by pathanmehash
      */
-    public function get_area_files($contextid, $component, $filearea, $itemid = false, $sort = "itemid, filepath, filename", $includedirs = true) {
+    public function get_area_files($contextid, $component, $filearea, $itemid = false, $sort = "itemid, filepath, filename",
+            $includedirs = true, $updatedsince = 0, $limitfrom = 0, $limitnum = 0) {
         global $DB;
 
-        $conditions = array('contextid'=>$contextid, 'component'=>$component, 'filearea'=>$filearea);
-        if ($itemid !== false) {
+        list($areasql, $conditions) = $DB->get_in_or_equal($filearea, SQL_PARAMS_NAMED);
+        $conditions['contextid'] = $contextid;
+        $conditions['component'] = $component;
+
+        if ($itemid !== false && is_array($filearea)) {
+            throw new coding_exception('You cannot specify multiple fileareas as well as an itemid.');
+        } else if ($itemid !== false) {
             $itemidsql = ' AND f.itemid = :itemid ';
             $conditions['itemid'] = $itemid;
         } else {
             $itemidsql = '';
+        }
+
+        $updatedsincesql = '';
+        if (!empty($updatedsince)) {
+            $conditions['time'] = $updatedsince;
+            $updatedsincesql = 'AND f.timemodified > :time';
+        }
+
+        $includedirssql = '';
+        if (!$includedirs) {
+            $includedirssql = 'AND f.filename != :dot';
+            $conditions['dot'] = '.';
+        }
+
+        if ($limitfrom && !$limitnum) {
+            throw new coding_exception('If specifying $limitfrom you must also specify $limitnum');
         }
 
         $sql = "SELECT ".self::instance_sql_fields('f', 'r')."
@@ -415,18 +645,17 @@ class file_storage {
                        ON f.referencefileid = r.id
                  WHERE f.contextid = :contextid
                        AND f.component = :component
-                       AND f.filearea = :filearea
+                       AND f.filearea $areasql
+                       $includedirssql
+                       $updatedsincesql
                        $itemidsql";
         if (!empty($sort)) {
             $sql .= " ORDER BY {$sort}";
         }
 
         $result = array();
-        $filerecords = $DB->get_records_sql($sql, $conditions);
+        $filerecords = $DB->get_records_sql($sql, $conditions, $limitfrom, $limitnum);
         foreach ($filerecords as $filerecord) {
-            if (!$includedirs and $filerecord->filename === '.') {
-                continue;
-            }
             $result[$filerecord->pathnamehash] = $this->get_file_instance($filerecord);
         }
         return $result;
@@ -493,10 +722,12 @@ class file_storage {
     protected function sort_area_tree($tree) {
         foreach ($tree as $key => &$value) {
             if ($key == 'subdirs') {
-                $value = $this->sort_area_tree($value);
-                collatorlib::ksort($value, collatorlib::SORT_NATURAL);
+                core_collator::ksort($value, core_collator::SORT_NATURAL);
+                foreach ($value as $subdirname => &$subtree) {
+                    $subtree = $this->sort_area_tree($subtree);
+                }
             } else if ($key == 'files') {
-                collatorlib::ksort($value, collatorlib::SORT_NATURAL);
+                core_collator::ksort($value, core_collator::SORT_NATURAL);
             }
         }
         return $tree;
@@ -527,7 +758,7 @@ class file_storage {
         if ($recursive) {
 
             $dirs = $includedirs ? "" : "AND filename <> '.'";
-            $length = textlib::strlen($filepath);
+            $length = core_text::strlen($filepath);
 
             $sql = "SELECT ".self::instance_sql_fields('f', 'r')."
                       FROM {files} f
@@ -556,7 +787,7 @@ class file_storage {
             $result = array();
             $params = array('contextid'=>$contextid, 'component'=>$component, 'filearea'=>$filearea, 'itemid'=>$itemid, 'filepath'=>$filepath, 'dirid'=>$directory->get_id());
 
-            $length = textlib::strlen($filepath);
+            $length = core_text::strlen($filepath);
 
             if ($includedirs) {
                 $sql = "SELECT ".self::instance_sql_fields('f', 'r')."
@@ -658,6 +889,21 @@ class file_storage {
     }
 
     /**
+     * Delete all files associated with the given component.
+     *
+     * @param string $component the component owning the file
+     */
+    public function delete_component_files($component) {
+        global $DB;
+
+        $filerecords = $DB->get_recordset('files', array('component' => $component));
+        foreach ($filerecords as $filerecord) {
+            $this->get_file_instance($filerecord)->delete();
+        }
+        $filerecords->close();
+    }
+
+    /**
      * Move all the files in a file area from one context to another.
      *
      * @param int $oldcontextid the context the files are being moved from.
@@ -736,7 +982,7 @@ class file_storage {
         static $contenthash = null;
         if (!$contenthash) {
             $this->add_string_to_pool('');
-            $contenthash = sha1('');
+            $contenthash = self::hash_from_string('');
         }
 
         $now = time();
@@ -772,6 +1018,27 @@ class file_storage {
         }
 
         return $dir_info;
+    }
+
+    /**
+     * Add new file record to database and handle callbacks.
+     *
+     * @param stdClass $newrecord
+     */
+    protected function create_file($newrecord) {
+        global $DB;
+        $newrecord->id = $DB->insert_record('files', $newrecord);
+
+        if ($newrecord->filename !== '.') {
+            // Callback for file created.
+            if ($pluginsfunction = get_plugins_with_function('after_file_created')) {
+                foreach ($pluginsfunction as $plugintype => $plugins) {
+                    foreach ($plugins as $pluginfunction) {
+                        $pluginfunction($newrecord);
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -860,7 +1127,7 @@ class file_storage {
                 }
             }
 
-            if ($key == 'referencefileid' or $key == 'referencelastsync' or $key == 'referencelifetime') {
+            if ($key == 'referencefileid' or $key == 'referencelastsync') {
                 $value = clean_param($value, PARAM_INT);
             }
 
@@ -882,13 +1149,13 @@ class file_storage {
         // creating a new file from an existing alias creates new alias implicitly.
         // here we just check the database consistency.
         if (!empty($newrecord->repositoryid)) {
-            if ($newrecord->referencefileid != $this->get_referencefileid($newrecord->repositoryid, $newrecord->reference, MUST_EXIST)) {
-                throw new file_reference_exception($newrecord->repositoryid, $newrecord->reference, $newrecord->referencefileid);
-            }
+            // It is OK if the current reference does not exist. It may have been altered by a repository plugin when the files
+            // where saved from a draft area.
+            $newrecord->referencefileid = $this->get_or_create_referencefileid($newrecord->repositoryid, $newrecord->reference);
         }
 
         try {
-            $newrecord->id = $DB->insert_record('files', $newrecord);
+            $this->create_file($newrecord);
         } catch (dml_exception $e) {
             throw new stored_file_creation_exception($newrecord->contextid, $newrecord->component, $newrecord->filearea, $newrecord->itemid,
                                                      $newrecord->filepath, $newrecord->filename, $e->debuginfo);
@@ -1051,15 +1318,15 @@ class file_storage {
         $newrecord->status       = empty($filerecord->status) ? 0 : $filerecord->status;
         $newrecord->sortorder    = $filerecord->sortorder;
 
-        list($newrecord->contenthash, $newrecord->filesize, $newfile) = $this->add_file_to_pool($pathname);
+        list($newrecord->contenthash, $newrecord->filesize, $newfile) = $this->add_file_to_pool($pathname, null, $newrecord);
 
         $newrecord->pathnamehash = $this->get_pathname_hash($newrecord->contextid, $newrecord->component, $newrecord->filearea, $newrecord->itemid, $newrecord->filepath, $newrecord->filename);
 
         try {
-            $newrecord->id = $DB->insert_record('files', $newrecord);
+            $this->create_file($newrecord);
         } catch (dml_exception $e) {
             if ($newfile) {
-                $this->deleted_file_cleanup($newrecord->contenthash);
+                $this->move_to_trash($newrecord->contenthash);
             }
             throw new stored_file_creation_exception($newrecord->contextid, $newrecord->component, $newrecord->filearea, $newrecord->itemid,
                                                     $newrecord->filepath, $newrecord->filename, $e->debuginfo);
@@ -1165,18 +1432,20 @@ class file_storage {
         $newrecord->status       = empty($filerecord->status) ? 0 : $filerecord->status;
         $newrecord->sortorder    = $filerecord->sortorder;
 
-        list($newrecord->contenthash, $newrecord->filesize, $newfile) = $this->add_string_to_pool($content);
-        $filepathname = $this->path_from_hash($newrecord->contenthash) . '/' . $newrecord->contenthash;
-        // get mimetype by magic bytes
-        $newrecord->mimetype = empty($filerecord->mimetype) ? $this->mimetype($filepathname, $filerecord->filename) : $filerecord->mimetype;
+        list($newrecord->contenthash, $newrecord->filesize, $newfile) = $this->add_string_to_pool($content, $newrecord);
+        if (empty($filerecord->mimetype)) {
+            $newrecord->mimetype = $this->filesystem->mimetype_from_hash($newrecord->contenthash, $newrecord->filename);
+        } else {
+            $newrecord->mimetype = $filerecord->mimetype;
+        }
 
         $newrecord->pathnamehash = $this->get_pathname_hash($newrecord->contextid, $newrecord->component, $newrecord->filearea, $newrecord->itemid, $newrecord->filepath, $newrecord->filename);
 
         try {
-            $newrecord->id = $DB->insert_record('files', $newrecord);
+            $this->create_file($newrecord);
         } catch (dml_exception $e) {
             if ($newfile) {
-                $this->deleted_file_cleanup($newrecord->contenthash);
+                $this->move_to_trash($newrecord->contenthash);
             }
             throw new stored_file_creation_exception($newrecord->contextid, $newrecord->component, $newrecord->filearea, $newrecord->itemid,
                                                     $newrecord->filepath, $newrecord->filename, $e->debuginfo);
@@ -1185,6 +1454,30 @@ class file_storage {
         $this->create_directory($newrecord->contextid, $newrecord->component, $newrecord->filearea, $newrecord->itemid, $newrecord->filepath, $newrecord->userid);
 
         return $this->get_file_instance($newrecord);
+    }
+
+    /**
+     * Synchronise stored file from file.
+     *
+     * @param stored_file $file Stored file to synchronise.
+     * @param string $path Path to the file to synchronise from.
+     * @param stdClass $filerecord The file record from the database.
+     */
+    public function synchronise_stored_file_from_file(stored_file $file, $path, $filerecord) {
+        list($contenthash, $filesize) = $this->add_file_to_pool($path, null, $filerecord);
+        $file->set_synchronized($contenthash, $filesize);
+    }
+
+    /**
+     * Synchronise stored file from string.
+     *
+     * @param stored_file $file Stored file to synchronise.
+     * @param string $content File content.
+     * @param stdClass $filerecord The file record from the database.
+     */
+    public function synchronise_stored_file_from_string(stored_file $file, $content, $filerecord) {
+        list($contenthash, $filesize) = $this->add_string_to_pool($content, $filerecord);
+        $file->set_synchronized($contenthash, $filesize);
     }
 
     /**
@@ -1228,10 +1521,6 @@ class file_storage {
         } else {
             $filerecord->sortorder = 0;
         }
-
-        // TODO MDL-33416 [2.4] fields referencelastsync and referencelifetime to be removed from {files} table completely
-        unset($filerecord->referencelastsync);
-        unset($filerecord->referencelifetime);
 
         $filerecord->mimetype          = empty($filerecord->mimetype) ? $this->mimetype($filerecord->filename) : $filerecord->mimetype;
         $filerecord->userid            = empty($filerecord->userid) ? null : $filerecord->userid;
@@ -1284,16 +1573,19 @@ class file_storage {
             throw new file_reference_exception($repositoryid, $reference, null, null, $e->getMessage());
         }
 
-        if (isset($filerecord->contenthash) && $this->content_exists($filerecord->contenthash)) {
-            // there was specified the contenthash for a file already stored in moodle filepool
+        $existingfile = null;
+        if (isset($filerecord->contenthash)) {
+            $existingfile = $DB->get_record('files', array('contenthash' => $filerecord->contenthash));
+        }
+        if (!empty($existingfile)) {
+            // There is an existing file already available.
             if (empty($filerecord->filesize)) {
-                $filepathname = $this->path_from_hash($filerecord->contenthash) . '/' . $filerecord->contenthash;
-                $filerecord->filesize = filesize($filepathname);
+                $filerecord->filesize = $existingfile->filesize;
             } else {
                 $filerecord->filesize = clean_param($filerecord->filesize, PARAM_INT);
             }
         } else {
-            // atempt to get the result of last synchronisation for this reference
+            // Attempt to get the result of last synchronisation for this reference.
             $lastcontent = $DB->get_record('files', array('referencefileid' => $filerecord->referencefileid),
                     'id, contenthash, filesize', IGNORE_MULTIPLE);
             if ($lastcontent) {
@@ -1302,7 +1594,7 @@ class file_storage {
             } else {
                 // External file doesn't have content in moodle.
                 // So we create an empty file for it.
-                list($filerecord->contenthash, $filerecord->filesize, $newfile) = $this->add_string_to_pool(null);
+                list($filerecord->contenthash, $filerecord->filesize, $newfile) = $this->add_string_to_pool(null, $filerecord);
             }
         }
 
@@ -1312,7 +1604,7 @@ class file_storage {
             $filerecord->id = $DB->insert_record('files', $filerecord);
         } catch (dml_exception $e) {
             if (!empty($newfile)) {
-                $this->deleted_file_cleanup($filerecord->contenthash);
+                $this->move_to_trash($filerecord->contenthash);
             }
             throw new stored_file_creation_exception($filerecord->contextid, $filerecord->component, $filerecord->filearea, $filerecord->itemid,
                                                     $filerecord->filepath, $filerecord->filename, $e->debuginfo);
@@ -1368,7 +1660,6 @@ class file_storage {
 
         $width    = $imageinfo['width'];
         $height   = $imageinfo['height'];
-        $mimetype = $imageinfo['mimetype'];
 
         if ($keepaspectratio) {
             if (0 >= $newwidth and 0 >= $newheight) {
@@ -1400,15 +1691,53 @@ class file_storage {
             }
         }
 
+        // The original image.
         $img = imagecreatefromstring($file->get_content());
+
+        // A new true color image where we will copy our original image.
+        $newimg = imagecreatetruecolor($newwidth, $newheight);
+
+        // Determine if the file supports transparency.
+        $hasalpha = $filerecord['mimetype'] == 'image/png' || $filerecord['mimetype'] == 'image/gif';
+
+        // Maintain transparency.
+        if ($hasalpha) {
+            imagealphablending($newimg, true);
+
+            // Get the current transparent index for the original image.
+            $colour = imagecolortransparent($img);
+            if ($colour == -1) {
+                // Set a transparent colour index if there's none.
+                $colour = imagecolorallocatealpha($newimg, 255, 255, 255, 127);
+                // Save full alpha channel.
+                imagesavealpha($newimg, true);
+            }
+            imagecolortransparent($newimg, $colour);
+            imagefill($newimg, 0, 0, $colour);
+        }
+
+        // Process the image to be output.
         if ($height != $newheight or $width != $newwidth) {
-            $newimg = imagecreatetruecolor($newwidth, $newheight);
-            if (!imagecopyresized($newimg, $img, 0, 0, 0, 0, $newwidth, $newheight, $width, $height)) {
+            // Resample if the dimensions differ from the original.
+            if (!imagecopyresampled($newimg, $img, 0, 0, 0, 0, $newwidth, $newheight, $width, $height)) {
                 // weird
                 throw new file_exception('storedfileproblem', 'Can not resize image');
             }
             imagedestroy($img);
             $img = $newimg;
+
+        } else if ($hasalpha) {
+            // Just copy to the new image with the alpha channel.
+            if (!imagecopy($newimg, $img, 0, 0, 0, 0, $width, $height)) {
+                // Weird.
+                throw new file_exception('storedfileproblem', 'Can not copy image');
+            }
+            imagedestroy($img);
+            $img = $newimg;
+
+        } else {
+            // No particular processing needed for the original image.
+            imagedestroy($newimg);
         }
 
         ob_start();
@@ -1427,6 +1756,11 @@ class file_storage {
 
             case 'image/png':
                 $quality = (int)$quality;
+
+                // Woah nelly! Because PNG quality is in the range 0 - 9 compared to JPEG quality,
+                // the latter of which can go to 100, we need to make sure that quality here is
+                // in a safe range or PHP WILL CRASH AND DIE. You have been warned.
+                $quality = $quality > 9 ? (int)(max(1.0, (float)$quality / 100.0) * 9.0) : $quality;
                 imagepng($img, NULL, $quality, NULL);
                 break;
 
@@ -1449,50 +1783,13 @@ class file_storage {
      * Add file content to sha1 pool.
      *
      * @param string $pathname path to file
-     * @param string $contenthash sha1 hash of content if known (performance only)
+     * @param string|null $contenthash sha1 hash of content if known (performance only)
+     * @param stdClass|null $newrecord New file record
      * @return array (contenthash, filesize, newfile)
      */
-    public function add_file_to_pool($pathname, $contenthash = NULL) {
-        if (!is_readable($pathname)) {
-            throw new file_exception('storedfilecannotread', '', $pathname);
-        }
-
-        if (is_null($contenthash)) {
-            $contenthash = sha1_file($pathname);
-        }
-
-        $filesize = filesize($pathname);
-
-        $hashpath = $this->path_from_hash($contenthash);
-        $hashfile = "$hashpath/$contenthash";
-
-        if (file_exists($hashfile)) {
-            if (filesize($hashfile) !== $filesize) {
-                throw new file_pool_content_exception($contenthash);
-            }
-            $newfile = false;
-
-        } else {
-            if (!is_dir($hashpath)) {
-                if (!mkdir($hashpath, $this->dirpermissions, true)) {
-                    throw new file_exception('storedfilecannotcreatefiledirs'); // permission trouble
-                }
-            }
-            $newfile = true;
-
-            if (!copy($pathname, $hashfile)) {
-                throw new file_exception('storedfilecannotread', '', $pathname);
-            }
-
-            if (filesize($hashfile) !== $filesize) {
-                @unlink($hashfile);
-                throw new file_pool_content_exception($contenthash);
-            }
-            chmod($hashfile, $this->filepermissions); // fix permissions if needed
-        }
-
-
-        return array($contenthash, $filesize, $newfile);
+    public function add_file_to_pool($pathname, $contenthash = null, $newrecord = null) {
+        $this->call_before_file_created_plugin_functions($newrecord, $pathname);
+        return $this->filesystem->add_file_from_path($pathname, $contenthash);
     }
 
     /**
@@ -1501,38 +1798,25 @@ class file_storage {
      * @param string $content file content - binary string
      * @return array (contenthash, filesize, newfile)
      */
-    public function add_string_to_pool($content) {
-        $contenthash = sha1($content);
-        $filesize = strlen($content); // binary length
+    public function add_string_to_pool($content, $newrecord = null) {
+        $this->call_before_file_created_plugin_functions($newrecord, null, $content);
+        return $this->filesystem->add_file_from_string($content);
+    }
 
-        $hashpath = $this->path_from_hash($contenthash);
-        $hashfile = "$hashpath/$contenthash";
-
-
-        if (file_exists($hashfile)) {
-            if (filesize($hashfile) !== $filesize) {
-                throw new file_pool_content_exception($contenthash);
+    /**
+     * before_file_created hook.
+     *
+     * @param stdClass|null $newrecord New file record.
+     * @param string|null $pathname Path to file.
+     * @param string|null $content File content.
+     */
+    protected function call_before_file_created_plugin_functions($newrecord, $pathname = null, $content = null) {
+        $pluginsfunction = get_plugins_with_function('before_file_created');
+        foreach ($pluginsfunction as $plugintype => $plugins) {
+            foreach ($plugins as $pluginfunction) {
+                $pluginfunction($newrecord, ['pathname' => $pathname, 'content' => $content]);
             }
-            $newfile = false;
-
-        } else {
-            if (!is_dir($hashpath)) {
-                if (!mkdir($hashpath, $this->dirpermissions, true)) {
-                    throw new file_exception('storedfilecannotcreatefiledirs'); // permission trouble
-                }
-            }
-            $newfile = true;
-
-            file_put_contents($hashfile, $content);
-
-            if (filesize($hashfile) !== $filesize) {
-                @unlink($hashfile);
-                throw new file_pool_content_exception($contenthash);
-            }
-            chmod($hashfile, $this->filepermissions); // fix permissions if needed
         }
-
-        return array($contenthash, $filesize, $newfile);
     }
 
     /**
@@ -1544,11 +1828,7 @@ class file_storage {
      * @return bool success
      */
     public function xsendfile($contenthash) {
-        global $CFG;
-        require_once("$CFG->libdir/xsendfilelib.php");
-
-        $hashpath = $this->path_from_hash($contenthash);
-        return xsendfile("$hashpath/$contenthash");
+        return $this->filesystem->xsendfile($contenthash);
     }
 
     /**
@@ -1556,39 +1836,12 @@ class file_storage {
      *
      * @param string $contenthash
      * @return bool
+     * @deprecated since 3.3
      */
     public function content_exists($contenthash) {
-        $dir = $this->path_from_hash($contenthash);
-        $filepath = $dir . '/' . $contenthash;
-        return file_exists($filepath);
-    }
+        debugging('The content_exists function has been deprecated and should no longer be used.', DEBUG_DEVELOPER);
 
-    /**
-     * Return path to file with given hash.
-     *
-     * NOTE: must not be public, files in pool must not be modified
-     *
-     * @param string $contenthash content hash
-     * @return string expected file location
-     */
-    protected function path_from_hash($contenthash) {
-        $l1 = $contenthash[0].$contenthash[1];
-        $l2 = $contenthash[2].$contenthash[3];
-        return "$this->filedir/$l1/$l2";
-    }
-
-    /**
-     * Return path to file with given hash.
-     *
-     * NOTE: must not be public, files in pool must not be modified
-     *
-     * @param string $contenthash content hash
-     * @return string expected file location
-     */
-    protected function trash_path_from_hash($contenthash) {
-        $l1 = $contenthash[0].$contenthash[1];
-        $l2 = $contenthash[2].$contenthash[3];
-        return "$this->trashdir/$l1/$l2";
+        return false;
     }
 
     /**
@@ -1596,69 +1849,12 @@ class file_storage {
      *
      * @param stored_file $file stored_file instance
      * @return bool success
+     * @deprecated since 3.3
      */
     public function try_content_recovery($file) {
-        $contenthash = $file->get_contenthash();
-        $trashfile = $this->trash_path_from_hash($contenthash).'/'.$contenthash;
-        if (!is_readable($trashfile)) {
-            if (!is_readable($this->trashdir.'/'.$contenthash)) {
-                return false;
-            }
-            // nice, at least alternative trash file in trash root exists
-            $trashfile = $this->trashdir.'/'.$contenthash;
-        }
-        if (filesize($trashfile) != $file->get_filesize() or sha1_file($trashfile) != $contenthash) {
-            //weird, better fail early
-            return false;
-        }
-        $contentdir  = $this->path_from_hash($contenthash);
-        $contentfile = $contentdir.'/'.$contenthash;
-        if (file_exists($contentfile)) {
-            //strange, no need to recover anything
-            return true;
-        }
-        if (!is_dir($contentdir)) {
-            if (!mkdir($contentdir, $this->dirpermissions, true)) {
-                return false;
-            }
-        }
-        return rename($trashfile, $contentfile);
-    }
+        debugging('The try_content_recovery function has been deprecated and should no longer be used.', DEBUG_DEVELOPER);
 
-    /**
-     * Marks pool file as candidate for deleting.
-     *
-     * DO NOT call directly - reserved for core!!
-     *
-     * @param string $contenthash
-     */
-    public function deleted_file_cleanup($contenthash) {
-        global $DB;
-
-        //Note: this section is critical - in theory file could be reused at the same
-        //      time, if this happens we can still recover the file from trash
-        if ($DB->record_exists('files', array('contenthash'=>$contenthash))) {
-            // file content is still used
-            return;
-        }
-        //move content file to trash
-        $contentfile = $this->path_from_hash($contenthash).'/'.$contenthash;
-        if (!file_exists($contentfile)) {
-            //weird, but no problem
-            return;
-        }
-        $trashpath = $this->trash_path_from_hash($contenthash);
-        $trashfile = $trashpath.'/'.$contenthash;
-        if (file_exists($trashfile)) {
-            // we already have this content in trash, no need to move it there
-            unlink($contentfile);
-            return;
-        }
-        if (!is_dir($trashpath)) {
-            mkdir($trashpath, $this->dirpermissions, true);
-        }
-        rename($contentfile, $trashfile);
-        chmod($trashfile, $this->filepermissions); // fix permissions if needed
+        return false;
     }
 
     /**
@@ -1674,7 +1870,7 @@ class file_storage {
         $reference['component'] = is_null($params['component']) ? null : clean_param($params['component'], PARAM_COMPONENT);
         $reference['itemid']    = is_null($params['itemid'])    ? null : clean_param($params['itemid'],    PARAM_INT);
         $reference['filearea']  = is_null($params['filearea'])  ? null : clean_param($params['filearea'],  PARAM_AREA);
-        $reference['filepath']  = is_null($params['filepath'])  ? null : clean_param($params['filepath'],  PARAM_PATH);;
+        $reference['filepath']  = is_null($params['filepath'])  ? null : clean_param($params['filepath'],  PARAM_PATH);
         $reference['filename']  = is_null($params['filename'])  ? null : clean_param($params['filename'],  PARAM_FILE);
         return base64_encode(serialize($reference));
     }
@@ -1707,6 +1903,63 @@ class file_storage {
             );
         }
         return $params;
+    }
+
+    /**
+     * Search through the server files.
+     *
+     * The query parameter will be used in conjuction with the SQL directive
+     * LIKE, so include '%' in it if you need to. This search will always ignore
+     * user files and directories. Note that the search is case insensitive.
+     *
+     * This query can quickly become inefficient so use it sparignly.
+     *
+     * @param  string  $query The string used with SQL LIKE.
+     * @param  integer $from  The offset to start the search at.
+     * @param  integer $limit The maximum number of results.
+     * @param  boolean $count When true this methods returns the number of results availabe,
+     *                        disregarding the parameters $from and $limit.
+     * @return int|array      Integer when count, otherwise array of stored_file objects.
+     */
+    public function search_server_files($query, $from = 0, $limit = 20, $count = false) {
+        global $DB;
+        $params = array(
+            'contextlevel' => CONTEXT_USER,
+            'directory' => '.',
+            'query' => $query
+        );
+
+        if ($count) {
+            $select = 'COUNT(1)';
+        } else {
+            $select = self::instance_sql_fields('f', 'r');
+        }
+        $like = $DB->sql_like('f.filename', ':query', false);
+
+        $sql = "SELECT $select
+                  FROM {files} f
+             LEFT JOIN {files_reference} r
+                    ON f.referencefileid = r.id
+                  JOIN {context} c
+                    ON f.contextid = c.id
+                 WHERE c.contextlevel <> :contextlevel
+                   AND f.filename <> :directory
+                   AND " . $like . "";
+
+        if ($count) {
+            return $DB->count_records_sql($sql, $params);
+        }
+
+        $sql .= " ORDER BY f.filename";
+
+        $result = array();
+        $filerecords = $DB->get_recordset_sql($sql, $params, $from, $limit);
+        foreach ($filerecords as $filerecord) {
+            $result[$filerecord->pathnamehash] = $this->get_file_instance($filerecord);
+        }
+        $filerecords->close();
+
+        return $result;
     }
 
     /**
@@ -1852,16 +2105,13 @@ class file_storage {
         $referencehash = sha1($reference);
 
         $sql = "SELECT repositoryid, id FROM {files_reference}
-                 WHERE referencehash = ? and reference = ?";
-        $rs = $DB->get_recordset_sql($sql, array($referencehash, $reference));
+                 WHERE referencehash = ?";
+        $rs = $DB->get_recordset_sql($sql, array($referencehash));
 
         $now = time();
         foreach ($rs as $record) {
-            require_once($CFG->dirroot.'/repository/lib.php');
-            $repo = repository::get_instance($record->repositoryid);
-            $lifetime = $repo->get_reference_file_lifetime($reference);
-            $this->update_references($record->id, $now, $lifetime,
-                    $storedfile->get_contenthash(), $storedfile->get_filesize(), 0);
+            $this->update_references($record->id, $now, null,
+                    $storedfile->get_contenthash(), $storedfile->get_filesize(), 0, $storedfile->get_timemodified());
         }
         $rs->close();
     }
@@ -1883,25 +2133,44 @@ class file_storage {
     }
 
     /**
-     * Return mimetype by given file pathname
+     * Return mimetype by given file pathname.
      *
      * If file has a known extension, we return the mimetype based on extension.
      * Otherwise (when possible) we try to get the mimetype from file contents.
      *
-     * @param string $pathname full path to the file
-     * @param string $filename correct file name with extension, if omitted will be taken from $path
+     * @param string $fullpath Full path to the file on disk
+     * @param string $filename Correct file name with extension, if omitted will be taken from $path
      * @return string
      */
-    public static function mimetype($pathname, $filename = null) {
+    public static function mimetype($fullpath, $filename = null) {
         if (empty($filename)) {
-            $filename = $pathname;
+            $filename = $fullpath;
         }
+
+        // The mimeinfo function determines the mimetype purely based on the file extension.
         $type = mimeinfo('type', $filename);
-        if ($type === 'document/unknown' && class_exists('finfo') && file_exists($pathname)) {
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $type = mimeinfo_from_type('type', $finfo->file($pathname));
+
+        if ($type === 'document/unknown') {
+            // The type is unknown. Inspect the file now.
+            $type = self::mimetype_from_file($fullpath);
         }
         return $type;
+    }
+
+    /**
+     * Inspect a file on disk for it's mimetype.
+     *
+     * @param string $fullpath Path to file on disk
+     * @return string The mimetype
+     */
+    public static function mimetype_from_file($fullpath) {
+        if (file_exists($fullpath)) {
+            // The type is unknown. Attempt to look up the file type now.
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            return mimeinfo_from_type('type', $finfo->file($fullpath));
+        }
+
+        return 'document/unknown';
     }
 
     /**
@@ -1909,10 +2178,12 @@ class file_storage {
      */
     public function cron() {
         global $CFG, $DB;
+        require_once($CFG->libdir.'/cronlib.php');
 
         // find out all stale draft areas (older than 4 days) and purge them
         // those are identified by time stamp of the /. root dir
         mtrace('Deleting old draft files... ', '');
+        cron_trace_time_and_memory();
         $old = time() - 60*60*24*4;
         $sql = "SELECT *
                   FROM {files}
@@ -1928,10 +2199,31 @@ class file_storage {
         // remove orphaned preview files (that is files in the core preview filearea without
         // the existing original file)
         mtrace('Deleting orphaned preview files... ', '');
+        cron_trace_time_and_memory();
         $sql = "SELECT p.*
                   FROM {files} p
              LEFT JOIN {files} o ON (p.filename = o.contenthash)
                  WHERE p.contextid = ? AND p.component = 'core' AND p.filearea = 'preview' AND p.itemid = 0
+                       AND o.id IS NULL";
+        $syscontext = context_system::instance();
+        $rs = $DB->get_recordset_sql($sql, array($syscontext->id));
+        foreach ($rs as $orphan) {
+            $file = $this->get_file_instance($orphan);
+            if (!$file->is_directory()) {
+                $file->delete();
+            }
+        }
+        $rs->close();
+        mtrace('done.');
+
+        // Remove orphaned converted files (that is files in the core documentconversion filearea without
+        // the existing original file).
+        mtrace('Deleting orphaned document conversion files... ', '');
+        cron_trace_time_and_memory();
+        $sql = "SELECT p.*
+                  FROM {files} p
+             LEFT JOIN {files} o ON (p.filename = o.contenthash)
+                 WHERE p.contextid = ? AND p.component = 'core' AND p.filearea = 'documentconversion' AND p.itemid = 0
                        AND o.id IS NULL";
         $syscontext = context_system::instance();
         $rs = $DB->get_recordset_sql($sql, array($syscontext->id));
@@ -1950,6 +2242,7 @@ class file_storage {
             require_once($CFG->libdir.'/filelib.php');
             // Delete files that are associated with a context that no longer exists.
             mtrace('Cleaning up files from deleted contexts... ', '');
+            cron_trace_time_and_memory();
             $sql = "SELECT DISTINCT f.contextid
                     FROM {files} f
                     LEFT OUTER JOIN {context} c ON f.contextid = c.id
@@ -1964,9 +2257,9 @@ class file_storage {
             $rs->close();
             mtrace('done.');
 
-            mtrace('Deleting trash files... ', '');
-            fulldelete($this->trashdir);
-            set_config('fileslastcleanup', time());
+            mtrace('Call filesystem cron tasks.', '');
+            cron_trace_time_and_memory();
+            $this->filesystem->cron();
             mtrace('done.');
         }
     }
@@ -1988,8 +2281,7 @@ class file_storage {
 
         $referencefields = array('repositoryid' => 'repositoryid',
             'reference' => 'reference',
-            'lastsync' => 'referencelastsync',
-            'lifetime' => 'referencelifetime');
+            'lastsync' => 'referencelastsync');
 
         // id is specifically named to prevent overlaping between the two tables.
         $fields = array();
@@ -2009,10 +2301,12 @@ class file_storage {
      * Returns the id of the record in {files_reference} that matches the passed repositoryid and reference
      *
      * If the record already exists, its id is returned. If there is no such record yet,
-     * new one is created (using the lastsync and lifetime provided, too) and its id is returned.
+     * new one is created (using the lastsync provided, too) and its id is returned.
      *
      * @param int $repositoryid
      * @param string $reference
+     * @param int $lastsync
+     * @param int $lifetime argument not used any more
      * @return int
      */
     private function get_or_create_referencefileid($repositoryid, $reference, $lastsync = null, $lifetime = null) {
@@ -2031,8 +2325,7 @@ class file_storage {
                 'repositoryid'  => $repositoryid,
                 'reference'     => $reference,
                 'referencehash' => sha1($reference),
-                'lastsync'      => $lastsync,
-                'lifetime'      => $lifetime));
+                'lastsync'      => $lastsync));
         } catch (dml_exception $e) {
             // if inserting the new record failed, chances are that the race condition has just
             // occured and the unique index did not allow to create the second record with the same
@@ -2066,21 +2359,20 @@ class file_storage {
      *
      * This function is called after synchronisation of an external file and updates the
      * contenthash, filesize and status of all files that reference this external file
-     * as well as time last synchronised and sync lifetime (how long we don't need to call
-     * synchronisation for this reference).
+     * as well as time last synchronised.
      *
      * @param int $referencefileid
      * @param int $lastsync
-     * @param int $lifetime
+     * @param int $lifetime argument not used any more, liefetime is returned by repository
      * @param string $contenthash
      * @param int $filesize
      * @param int $status 0 if ok or 666 if source is missing
+     * @param int $timemodified last time modified of the source, if known
      */
-    public function update_references($referencefileid, $lastsync, $lifetime, $contenthash, $filesize, $status) {
+    public function update_references($referencefileid, $lastsync, $lifetime, $contenthash, $filesize, $status, $timemodified = null) {
         global $DB;
         $referencefileid = clean_param($referencefileid, PARAM_INT);
         $lastsync = clean_param($lastsync, PARAM_INT);
-        $lifetime = clean_param($lifetime, PARAM_INT);
         validate_param($contenthash, PARAM_TEXT, NULL_NOT_ALLOWED);
         $filesize = clean_param($filesize, PARAM_INT);
         $status = clean_param($status, PARAM_INT);
@@ -2088,12 +2380,31 @@ class file_storage {
                     'filesize' => $filesize,
                     'status' => $status,
                     'referencefileid' => $referencefileid,
-                    'lastsync' => $lastsync,
-                    'lifetime' => $lifetime);
+                    'timemodified' => $timemodified);
         $DB->execute('UPDATE {files} SET contenthash = :contenthash, filesize = :filesize,
-            status = :status, referencelastsync = :lastsync, referencelifetime = :lifetime
+            status = :status ' . ($timemodified ? ', timemodified = :timemodified' : '') . '
             WHERE referencefileid = :referencefileid', $params);
-        $data = array('id' => $referencefileid, 'lastsync' => $lastsync, 'lifetime' => $lifetime);
+        $data = array('id' => $referencefileid, 'lastsync' => $lastsync);
         $DB->update_record('files_reference', (object)$data);
+    }
+
+    /**
+     * Calculate and return the contenthash of the supplied file.
+     *
+     * @param   string $filepath The path to the file on disk
+     * @return  string The file's content hash
+     */
+    public static function hash_from_path($filepath) {
+        return sha1_file($filepath);
+    }
+
+    /**
+     * Calculate and return the contenthash of the supplied content.
+     *
+     * @param   string $content The file content
+     * @return  string The file's content hash
+     */
+    public static function hash_from_string($content) {
+        return sha1($content);
     }
 }

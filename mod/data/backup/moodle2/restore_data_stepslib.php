@@ -16,7 +16,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @package moodlecore
+ * @package    mod_data
  * @subpackage backup-moodle2
  * @copyright 2010 onwards Eloy Lafuente (stronk7) {@link http://stronk7.com}
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -55,6 +55,8 @@ class restore_data_activity_structure_step extends restore_activity_structure_st
         $oldid = $data->id;
         $data->course = $this->get_courseid();
 
+        // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+        // See MDL-9367.
         $data->timeavailablefrom = $this->apply_date_offset($data->timeavailablefrom);
         $data->timeavailableto = $this->apply_date_offset($data->timeavailableto);
         $data->timeviewfrom = $this->apply_date_offset($data->timeviewfrom);
@@ -96,9 +98,6 @@ class restore_data_activity_structure_step extends restore_activity_structure_st
         $data = (object)$data;
         $oldid = $data->id;
 
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
-
         $data->userid = $this->get_mappingid('user', $data->userid);
         $data->groupid = $this->get_mappingid('group', $data->groupid);
         $data->dataid = $this->get_new_parentid('data');
@@ -135,8 +134,6 @@ class restore_data_activity_structure_step extends restore_activity_structure_st
         }
         $data->rating = $data->value;
         $data->userid = $this->get_mappingid('user', $data->userid);
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         // We need to check that component and ratingarea are both set here.
         if (empty($data->component)) {

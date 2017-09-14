@@ -6,7 +6,7 @@
  * @author Kenneth Riba
  *
  * @license http://www.gnu.org/copyleft/gpl.html GNU Public License
- * @package wiki
+ * @package mod_wiki
  *
  */
 
@@ -60,11 +60,11 @@ function wiki_print_editor_wiki($pageid, $content, $editor, $version = -1, $sect
     $tag = getTokens($editor, 'nowiki');
     $wiki_editor['nowiki'] = array('ed_nowiki.gif', get_string('wikinowikitext', 'wiki'), $tag[0], $tag[1], get_string('wikinowikitext', 'wiki'));
 
-    $OUTPUT->heading(strtoupper(get_string('format' . $editor, 'wiki')));
+    $OUTPUT->heading(strtoupper(get_string('format' . $editor, 'wiki')), 3);
 
     $PAGE->requires->js('/mod/wiki/editors/wiki/buttons.js');
 
-    echo $OUTPUT->container_start('mdl-align');
+    echo $OUTPUT->container_start();
     foreach ($wiki_editor as $button) {
         echo "<a href=\"javascript:insertTags";
         echo "('" . $button[2] . "','" . $button[3] . "','" . $button[4] . "');\">";
@@ -73,7 +73,7 @@ function wiki_print_editor_wiki($pageid, $content, $editor, $version = -1, $sect
     }
     echo $OUTPUT->container_end();
 
-    echo $OUTPUT->container_start('mdl-align');
+    echo $OUTPUT->container_start();
     echo '<form method="post" id="mform1" action="' . $action . '">';
     echo $OUTPUT->container(print_textarea(false, 20, 60, 0, 0, "newcontent", $content, 0, true), false, 'wiki_editor');
     echo $OUTPUT->container_start();

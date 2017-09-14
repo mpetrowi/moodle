@@ -24,7 +24,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(__FILE__) . '/../../../config.php');
+require_once(__DIR__ . '/../../../config.php');
 require_once($CFG->libdir.'/adminlib.php');
 
 $action = optional_param('action', '', PARAM_ALPHANUMEXT);
@@ -61,7 +61,7 @@ if ($action === 'delete') {
     //show confirmation
     echo $OUTPUT->header();
     $yesurl = new moodle_url($PAGE->url, array('roleid'=>$roleid, 'contextlevel'=>$contextlevel, 'action'=>'delete', 'confirm'=>1, 'sesskey'=>sesskey()));
-    $levelname = get_contextlevel_name($contextlevel);
+    $levelname = context_helper::get_level_name($contextlevel);
     $rolename = format_string($role->name);
     $message = get_string('confirmdelete', 'tool_unsuproles', array('level'=>$levelname, 'role'=>$rolename));
     echo $OUTPUT->confirm($message, $yesurl, $PAGE->url);
@@ -96,15 +96,15 @@ if (!$problems) {
     $roles = get_all_roles();
     $data = array();
     foreach ($problems as $problem) {
-        $levelname = get_contextlevel_name($problem->contextlevel);
+        $levelname = context_helper::get_level_name($problem->contextlevel);
         $rolename = role_get_name($roles[$problem->roleid]);
         //TODO: show list of users if count low
         $count = $problem->racount;
         $edit = array();
         $aurl = new moodle_url('/admin/roles/define.php', array('roleid'=>$problem->roleid, 'action'=>'edit'));
-        $edit[] = html_writer::link($aurl, html_writer::empty_tag('img', array('src'=>$OUTPUT->pix_url('t/edit'), 'alt'=>get_string('edit'), 'class'=>'smallicon')));
+        $edit[] = html_writer::link($aurl, $OUTPUT->pix_icon('t/edit', 'core', get_string('edit')));
         $aurl = new moodle_url($PAGE->url, array('roleid'=>$problem->roleid, 'contextlevel'=>$problem->contextlevel, 'action'=>'delete'));
-        $edit[] = html_writer::link($aurl, html_writer::empty_tag('img', array('src'=>$OUTPUT->pix_url('t/delete'), 'alt'=>get_string('delete'), 'class'=>'smallicon')));
+        $edit[] = html_writer::link($aurl, $OUTPUT->pix_icon('t/delete', 'core', get_string('delete')));
         $data[] = array($levelname, $rolename, $count, implode('&nbsp;', $edit));
     }
     $table = new html_table();

@@ -18,7 +18,7 @@
 /**
  * This plugin is used to access recent used files
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository_recent
  * @copyright  2010 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -28,7 +28,7 @@ require_once($CFG->dirroot . '/repository/lib.php');
 /**
  * repository_recent class is used to browse recent used files
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    repository_recent
  * @copyright  2010 Dongsheng Cai {@link http://dongsheng.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -126,7 +126,7 @@ class repository_recent extends repository {
                 $fileinfo = $browser->get_file_info($context, $file['component'],
                         $file['filearea'], $file['itemid'], $file['filepath'], $file['filename']);
                 if ($fileinfo) {
-                    $params = base64_encode(serialize($file));
+                    $params = base64_encode(json_encode($file));
                     $node = array(
                         'title' => $fileinfo->get_visible_name(),
                         'size' => $fileinfo->get_filesize(),
@@ -135,8 +135,8 @@ class repository_recent extends repository {
                         'author' => $fileinfo->get_author(),
                         'license' => $fileinfo->get_license(),
                         'source'=> $params,
-                        'icon' => $OUTPUT->pix_url(file_file_icon($fileinfo, 24))->out(false),
-                        'thumbnail' => $OUTPUT->pix_url(file_file_icon($fileinfo, 90))->out(false),
+                        'icon' => $OUTPUT->image_url(file_file_icon($fileinfo, 24))->out(false),
+                        'thumbnail' => $OUTPUT->image_url(file_file_icon($fileinfo, 90))->out(false),
                     );
                     if ($imageinfo = $fileinfo->get_imageinfo()) {
                         $fileurl = new moodle_url($fileinfo->get_url());
@@ -166,6 +166,7 @@ class repository_recent extends repository {
             $number = DEFAULT_RECENT_FILES_NUM;
         }
         $mform->addElement('text', 'recentfilesnumber', get_string('recentfilesnumber', 'repository_recent'));
+        $mform->setType('recentfilesnumber', PARAM_INT);
         $mform->setDefault('recentfilesnumber', $number);
     }
 
@@ -191,7 +192,8 @@ class repository_recent extends repository {
      */
     public function file_is_accessible($source) {
         global $USER;
-        $file = self::get_moodle_file($source);
+        $reference = $this->get_file_reference($source);
+        $file = self::get_moodle_file($reference);
         return (!empty($file) && $file->get_userid() == $USER->id);
     }
 
@@ -202,5 +204,14 @@ class repository_recent extends repository {
      */
     public function has_moodle_files() {
         return true;
+    }
+
+    /**
+     * Is this repository accessing private data?
+     *
+     * @return bool
+     */
+    public function contains_private_data() {
+        return false;
     }
 }

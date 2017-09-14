@@ -27,6 +27,7 @@ defined('MOODLE_INTERNAL') || die();
 
 global $CFG;
 require_once($CFG->dirroot . '/mod/workshop/locallib.php'); // Include the code to test
+require_once(__DIR__ . '/fixtures/testable.php');
 
 
 /**
@@ -34,14 +35,20 @@ require_once($CFG->dirroot . '/mod/workshop/locallib.php'); // Include the code 
  */
 class mod_workshop_internal_api_testcase extends advanced_testcase {
 
-    /** workshop instance emulation */
+    /** @var object */
+    protected $course;
+
+    /** @var workshop */
     protected $workshop;
 
     /** setup testing environment */
     protected function setUp() {
         parent::setUp();
-
-        $this->workshop = new testable_workshop();
+        $this->setAdminUser();
+        $this->course = $this->getDataGenerator()->create_course();
+        $workshop = $this->getDataGenerator()->create_module('workshop', array('course' => $this->course));
+        $cm = get_coursemodule_from_instance('workshop', $workshop->id, $this->course->id, false, MUST_EXIST);
+        $this->workshop = new testable_workshop($workshop, $cm, $this->course);
     }
 
     protected function tearDown() {
@@ -50,6 +57,8 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_aggregate_submission_grades_process_notgraded() {
+        $this->resetAfterTest(true);
+
         // fixture set-up
         $batch = array();   // batch of a submission's assessments
         $batch[] = (object)array('submissionid' => 12, 'submissiongrade' => null, 'weight' => 1, 'grade' => null);
@@ -126,6 +135,8 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_aggregate_submission_grades_process_mean_nochange() {
+        $this->resetAfterTest(true);
+
         // fixture set-up
         $batch = array();   // batch of a submission's assessments
         $batch[] = (object)array('submissionid' => 45, 'submissiongrade' => 19.67750, 'weight' => 1, 'grade' => 56.12000);
@@ -167,6 +178,7 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_aggregate_grading_grades_process_nograding() {
+        $this->resetAfterTest(true);
         // fixture set-up
         $batch = array();
         $batch[] = (object)array('reviewerid'=>2, 'gradinggrade'=>null, 'gradinggradeover'=>null, 'aggregationid'=>null, 'aggregatedgrade'=>null);
@@ -205,6 +217,7 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_aggregate_grading_grades_process_single_grade_uptodate() {
+        $this->resetAfterTest(true);
         // fixture set-up
         $batch = array();
         $batch[] = (object)array('reviewerid'=>3, 'gradinggrade'=>90.00000, 'gradinggradeover'=>null, 'aggregationid'=>1, 'aggregatedgrade'=>90.00000);
@@ -297,6 +310,7 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_percent_to_value() {
+        $this->resetAfterTest(true);
         // fixture setup
         $total = 185;
         $percent = 56.6543;
@@ -306,27 +320,34 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
         $this->assertEquals($part, $total * $percent / 100);
     }
 
+    /**
+     * @expectedException coding_exception
+     */
     public function test_percent_to_value_negative() {
+        $this->resetAfterTest(true);
         // fixture setup
         $total = 185;
         $percent = -7.098;
-        // set expectation
-        $this->setExpectedException('coding_exception');
+
         // exercise SUT
         $part = workshop::percent_to_value($percent, $total);
     }
 
+    /**
+     * @expectedException coding_exception
+     */
     public function test_percent_to_value_over_hundred() {
+        $this->resetAfterTest(true);
         // fixture setup
         $total = 185;
         $percent = 121.08;
-        // set expectation
-        $this->setExpectedException('coding_exception');
+
         // exercise SUT
         $part = workshop::percent_to_value($percent, $total);
     }
 
     public function test_lcm() {
+        $this->resetAfterTest(true);
         // fixture setup + exercise SUT + verify in one step
         $this->assertEquals(workshop::lcm(1,4), 4);
         $this->assertEquals(workshop::lcm(2,4), 4);
@@ -336,6 +357,7 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_lcm_array() {
+        $this->resetAfterTest(true);
         // fixture setup
         $numbers = array(5,3,15);
         // excersise SUT
@@ -345,6 +367,7 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
     }
 
     public function test_prepare_example_assessment() {
+        $this->resetAfterTest(true);
         // fixture setup
         $fakerawrecord = (object)array(
             'id'                => 42,
@@ -355,6 +378,9 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
             'grade'             => null,
             'gradinggrade'      => null,
             'gradinggradeover'  => null,
+            'feedbackauthor'    => null,
+            'feedbackauthorformat' => 0,
+            'feedbackauthorattachment' => 0,
         );
         // excersise SUT
         $a = $this->workshop->prepare_example_assessment($fakerawrecord);
@@ -364,13 +390,14 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
 
         // modify setup
         $fakerawrecord->weight = 1;
-        $this->setExpectedException('coding_exception');
+        $this->expectException('coding_exception');
         // excersise SUT
         $a = $this->workshop->prepare_example_assessment($fakerawrecord);
     }
 
     public function test_prepare_example_reference_assessment() {
         global $USER;
+        $this->resetAfterTest(true);
         // fixture setup
         $fakerawrecord = (object)array(
             'id'                => 38,
@@ -381,6 +408,9 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
             'grade'             => 0.75000,
             'gradinggrade'      => 1.00000,
             'gradinggradeover'  => null,
+            'feedbackauthor'    => null,
+            'feedbackauthorformat' => 0,
+            'feedbackauthorattachment' => 0,
         );
         // excersise SUT
         $a = $this->workshop->prepare_example_reference_assessment($fakerawrecord);
@@ -389,31 +419,361 @@ class mod_workshop_internal_api_testcase extends advanced_testcase {
 
         // modify setup
         $fakerawrecord->weight = 0;
-        $this->setExpectedException('coding_exception');
+        $this->expectException('coding_exception');
         // excersise SUT
         $a = $this->workshop->prepare_example_reference_assessment($fakerawrecord);
     }
-}
 
+    /**
+     * Tests user restrictions, as they affect lists of users returned by
+     * core API functions.
+     *
+     * This includes the groupingid option (when group mode is in use), and
+     * standard activity restrictions using the availability API.
+     */
+    public function test_user_restrictions() {
+        global $DB, $CFG;
 
-/**
- * Test subclass that makes all the protected methods we want to test public.
- */
-class testable_workshop extends workshop {
+        $this->resetAfterTest();
 
-    public function __construct() {
-        $this->id       = 16;
-        $this->cm       = new stdclass();
-        $this->course   = new stdclass();
-        $this->context  = new stdclass();
+        // Use existing sample course from setUp.
+        $courseid = $this->workshop->course->id;
+
+        // Make a test grouping and two groups.
+        $generator = $this->getDataGenerator();
+        $grouping = $generator->create_grouping(array('courseid' => $courseid));
+        $group1 = $generator->create_group(array('courseid' => $courseid));
+        groups_assign_grouping($grouping->id, $group1->id);
+        $group2 = $generator->create_group(array('courseid' => $courseid));
+        groups_assign_grouping($grouping->id, $group2->id);
+
+        // Group 3 is not in the grouping.
+        $group3 = $generator->create_group(array('courseid' => $courseid));
+
+        // Enrol some students.
+        $roleids = $DB->get_records_menu('role', null, '', 'shortname, id');
+        $student1 = $generator->create_user();
+        $student2 = $generator->create_user();
+        $student3 = $generator->create_user();
+        $generator->enrol_user($student1->id, $courseid, $roleids['student']);
+        $generator->enrol_user($student2->id, $courseid, $roleids['student']);
+        $generator->enrol_user($student3->id, $courseid, $roleids['student']);
+
+        // Place students in groups (except student 3).
+        groups_add_member($group1, $student1);
+        groups_add_member($group2, $student2);
+        groups_add_member($group3, $student3);
+
+        // The existing workshop doesn't have any restrictions, so user lists
+        // should include all three users.
+        $allusers = get_enrolled_users(context_course::instance($courseid));
+        $result = $this->workshop->get_grouped($allusers);
+        $this->assertCount(4, $result);
+        $users = array_keys($result[0]);
+        sort($users);
+        $this->assertEquals(array($student1->id, $student2->id, $student3->id), $users);
+        $this->assertEquals(array($student1->id), array_keys($result[$group1->id]));
+        $this->assertEquals(array($student2->id), array_keys($result[$group2->id]));
+        $this->assertEquals(array($student3->id), array_keys($result[$group3->id]));
+
+        // Test get_users_with_capability_sql (via get_potential_authors).
+        $users = $this->workshop->get_potential_authors(false);
+        $this->assertCount(3, $users);
+        $users = $this->workshop->get_potential_authors(false, $group2->id);
+        $this->assertEquals(array($student2->id), array_keys($users));
+
+        // Create another test workshop with grouping set.
+        $workshopitem = $this->getDataGenerator()->create_module('workshop',
+                array('course' => $courseid, 'groupmode' => SEPARATEGROUPS,
+                'groupingid' => $grouping->id));
+        $cm = get_coursemodule_from_instance('workshop', $workshopitem->id,
+                $courseid, false, MUST_EXIST);
+        $workshopgrouping = new testable_workshop($workshopitem, $cm, $this->workshop->course);
+
+        // This time the result should only include users and groups in the
+        // selected grouping.
+        $result = $workshopgrouping->get_grouped($allusers);
+        $this->assertCount(3, $result);
+        $users = array_keys($result[0]);
+        sort($users);
+        $this->assertEquals(array($student1->id, $student2->id), $users);
+        $this->assertEquals(array($student1->id), array_keys($result[$group1->id]));
+        $this->assertEquals(array($student2->id), array_keys($result[$group2->id]));
+
+        // Test get_users_with_capability_sql (via get_potential_authors).
+        $users = $workshopgrouping->get_potential_authors(false);
+        $userids = array_keys($users);
+        sort($userids);
+        $this->assertEquals(array($student1->id, $student2->id), $userids);
+        $users = $workshopgrouping->get_potential_authors(false, $group2->id);
+        $this->assertEquals(array($student2->id), array_keys($users));
+
+        // Enable the availability system and create another test workshop with
+        // availability restriction on grouping.
+        $CFG->enableavailability = true;
+        $workshopitem = $this->getDataGenerator()->create_module('workshop',
+                array('course' => $courseid, 'availability' => json_encode(
+                    \core_availability\tree::get_root_json(array(
+                    \availability_grouping\condition::get_json($grouping->id)),
+                    \core_availability\tree::OP_AND, false))));
+        $cm = get_coursemodule_from_instance('workshop', $workshopitem->id,
+                $courseid, false, MUST_EXIST);
+        $workshoprestricted = new testable_workshop($workshopitem, $cm, $this->workshop->course);
+
+        // The get_grouped function isn't intended to apply this restriction,
+        // so it should be the same as the base workshop. (Note: in reality,
+        // get_grouped is always run with the parameter being the result of
+        // one of the get_potential_xxx functions, so it works.)
+        $result = $workshoprestricted->get_grouped($allusers);
+        $this->assertCount(4, $result);
+        $this->assertCount(3, $result[0]);
+
+        // The get_users_with_capability_sql-based functions should apply it.
+        $users = $workshoprestricted->get_potential_authors(false);
+        $userids = array_keys($users);
+        sort($userids);
+        $this->assertEquals(array($student1->id, $student2->id), $userids);
+        $users = $workshoprestricted->get_potential_authors(false, $group2->id);
+        $this->assertEquals(array($student2->id), array_keys($users));
     }
 
-    public function aggregate_submission_grades_process(array $assessments) {
-        parent::aggregate_submission_grades_process($assessments);
+    /**
+     * Test the workshop reset feature.
+     */
+    public function test_reset_phase() {
+        $this->resetAfterTest(true);
+
+        $this->workshop->switch_phase(workshop::PHASE_CLOSED);
+        $this->assertEquals(workshop::PHASE_CLOSED, $this->workshop->phase);
+
+        $settings = (object)array(
+            'reset_workshop_phase' => 0,
+        );
+        $status = $this->workshop->reset_userdata($settings);
+        $this->assertEquals(workshop::PHASE_CLOSED, $this->workshop->phase);
+
+        $settings = (object)array(
+            'reset_workshop_phase' => 1,
+        );
+        $status = $this->workshop->reset_userdata($settings);
+        $this->assertEquals(workshop::PHASE_SETUP, $this->workshop->phase);
+        foreach ($status as $result) {
+            $this->assertFalse($result['error']);
+        }
     }
 
-    public function aggregate_grading_grades_process(array $assessments, $timegraded = null) {
-        parent::aggregate_grading_grades_process($assessments, $timegraded);
+    /**
+     * Test deleting assessments related data on workshop reset.
+     */
+    public function test_reset_userdata_assessments() {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $student1 = $this->getDataGenerator()->create_user();
+        $student2 = $this->getDataGenerator()->create_user();
+
+        $this->getDataGenerator()->enrol_user($student1->id, $this->workshop->course->id);
+        $this->getDataGenerator()->enrol_user($student2->id, $this->workshop->course->id);
+
+        $workshopgenerator = $this->getDataGenerator()->get_plugin_generator('mod_workshop');
+
+        $subid1 = $workshopgenerator->create_submission($this->workshop->id, $student1->id);
+        $subid2 = $workshopgenerator->create_submission($this->workshop->id, $student2->id);
+
+        $asid1 = $workshopgenerator->create_assessment($subid1, $student2->id);
+        $asid2 = $workshopgenerator->create_assessment($subid2, $student1->id);
+
+        $settings = (object)array(
+            'reset_workshop_assessments' => 1,
+        );
+        $status = $this->workshop->reset_userdata($settings);
+
+        foreach ($status as $result) {
+            $this->assertFalse($result['error']);
+        }
+
+        $this->assertEquals(2, $DB->count_records('workshop_submissions', array('workshopid' => $this->workshop->id)));
+        $this->assertEquals(0, $DB->count_records('workshop_assessments'));
     }
 
+    /**
+     * Test deleting submissions related data on workshop reset.
+     */
+    public function test_reset_userdata_submissions() {
+        global $DB;
+        $this->resetAfterTest(true);
+
+        $student1 = $this->getDataGenerator()->create_user();
+        $student2 = $this->getDataGenerator()->create_user();
+
+        $this->getDataGenerator()->enrol_user($student1->id, $this->workshop->course->id);
+        $this->getDataGenerator()->enrol_user($student2->id, $this->workshop->course->id);
+
+        $workshopgenerator = $this->getDataGenerator()->get_plugin_generator('mod_workshop');
+
+        $subid1 = $workshopgenerator->create_submission($this->workshop->id, $student1->id);
+        $subid2 = $workshopgenerator->create_submission($this->workshop->id, $student2->id);
+
+        $asid1 = $workshopgenerator->create_assessment($subid1, $student2->id);
+        $asid2 = $workshopgenerator->create_assessment($subid2, $student1->id);
+
+        $settings = (object)array(
+            'reset_workshop_submissions' => 1,
+        );
+        $status = $this->workshop->reset_userdata($settings);
+
+        foreach ($status as $result) {
+            $this->assertFalse($result['error']);
+        }
+
+        $this->assertEquals(0, $DB->count_records('workshop_submissions', array('workshopid' => $this->workshop->id)));
+        $this->assertEquals(0, $DB->count_records('workshop_assessments'));
+    }
+
+    /**
+     * Test normalizing list of extensions.
+     */
+    public function test_normalize_file_extensions() {
+        $this->resetAfterTest(true);
+
+        workshop::normalize_file_extensions('');
+        $this->assertDebuggingCalled();
+    }
+
+    /**
+     * Test cleaning list of extensions.
+     */
+    public function test_clean_file_extensions() {
+        $this->resetAfterTest(true);
+
+        workshop::clean_file_extensions('');
+        $this->assertDebuggingCalledCount(2);
+    }
+
+    /**
+     * Test validation of the list of file extensions.
+     */
+    public function test_invalid_file_extensions() {
+        $this->resetAfterTest(true);
+
+        workshop::invalid_file_extensions('', '');
+        $this->assertDebuggingCalledCount(3);
+    }
+
+    /**
+     * Test checking file name against the list of allowed extensions.
+     */
+    public function test_is_allowed_file_type() {
+        $this->resetAfterTest(true);
+
+        workshop::is_allowed_file_type('', '');
+        $this->assertDebuggingCalledCount(2);
+    }
+
+    /**
+     * Test workshop::check_group_membership() functionality.
+     */
+    public function test_check_group_membership() {
+        global $DB, $CFG;
+
+        $this->resetAfterTest();
+
+        $courseid = $this->course->id;
+        $generator = $this->getDataGenerator();
+
+        // Make test groups.
+        $group1 = $generator->create_group(array('courseid' => $courseid));
+        $group2 = $generator->create_group(array('courseid' => $courseid));
+        $group3 = $generator->create_group(array('courseid' => $courseid));
+
+        // Revoke the accessallgroups from non-editing teachers (tutors).
+        $roleids = $DB->get_records_menu('role', null, '', 'shortname, id');
+        unassign_capability('moodle/site:accessallgroups', $roleids['teacher']);
+
+        // Create test use accounts.
+        $teacher1 = $generator->create_user();
+        $tutor1 = $generator->create_user();
+        $tutor2 = $generator->create_user();
+        $student1 = $generator->create_user();
+        $student2 = $generator->create_user();
+        $student3 = $generator->create_user();
+
+        // Enrol the teacher (has the access all groups permission).
+        $generator->enrol_user($teacher1->id, $courseid, $roleids['editingteacher']);
+
+        // Enrol tutors (can not access all groups).
+        $generator->enrol_user($tutor1->id, $courseid, $roleids['teacher']);
+        $generator->enrol_user($tutor2->id, $courseid, $roleids['teacher']);
+
+        // Enrol students.
+        $generator->enrol_user($student1->id, $courseid, $roleids['student']);
+        $generator->enrol_user($student2->id, $courseid, $roleids['student']);
+        $generator->enrol_user($student3->id, $courseid, $roleids['student']);
+
+        // Add users in groups.
+        groups_add_member($group1, $tutor1);
+        groups_add_member($group2, $tutor2);
+        groups_add_member($group1, $student1);
+        groups_add_member($group2, $student2);
+        groups_add_member($group3, $student3);
+
+        // Workshop with no groups.
+        $workshopitem1 = $this->getDataGenerator()->create_module('workshop', [
+            'course' => $courseid,
+            'groupmode' => NOGROUPS,
+        ]);
+        $cm = get_coursemodule_from_instance('workshop', $workshopitem1->id, $courseid, false, MUST_EXIST);
+        $workshop1 = new testable_workshop($workshopitem1, $cm, $this->course);
+
+        $this->setUser($teacher1);
+        $this->assertTrue($workshop1->check_group_membership($student1->id));
+        $this->assertTrue($workshop1->check_group_membership($student2->id));
+        $this->assertTrue($workshop1->check_group_membership($student3->id));
+
+        $this->setUser($tutor1);
+        $this->assertTrue($workshop1->check_group_membership($student1->id));
+        $this->assertTrue($workshop1->check_group_membership($student2->id));
+        $this->assertTrue($workshop1->check_group_membership($student3->id));
+
+        // Workshop in visible groups mode.
+        $workshopitem2 = $this->getDataGenerator()->create_module('workshop', [
+            'course' => $courseid,
+            'groupmode' => VISIBLEGROUPS,
+        ]);
+        $cm = get_coursemodule_from_instance('workshop', $workshopitem2->id, $courseid, false, MUST_EXIST);
+        $workshop2 = new testable_workshop($workshopitem2, $cm, $this->course);
+
+        $this->setUser($teacher1);
+        $this->assertTrue($workshop2->check_group_membership($student1->id));
+        $this->assertTrue($workshop2->check_group_membership($student2->id));
+        $this->assertTrue($workshop2->check_group_membership($student3->id));
+
+        $this->setUser($tutor1);
+        $this->assertTrue($workshop2->check_group_membership($student1->id));
+        $this->assertTrue($workshop2->check_group_membership($student2->id));
+        $this->assertTrue($workshop2->check_group_membership($student3->id));
+
+        // Workshop in separate groups mode.
+        $workshopitem3 = $this->getDataGenerator()->create_module('workshop', [
+            'course' => $courseid,
+            'groupmode' => SEPARATEGROUPS,
+        ]);
+        $cm = get_coursemodule_from_instance('workshop', $workshopitem3->id, $courseid, false, MUST_EXIST);
+        $workshop3 = new testable_workshop($workshopitem3, $cm, $this->course);
+
+        $this->setUser($teacher1);
+        $this->assertTrue($workshop3->check_group_membership($student1->id));
+        $this->assertTrue($workshop3->check_group_membership($student2->id));
+        $this->assertTrue($workshop3->check_group_membership($student3->id));
+
+        $this->setUser($tutor1);
+        $this->assertTrue($workshop3->check_group_membership($student1->id));
+        $this->assertFalse($workshop3->check_group_membership($student2->id));
+        $this->assertFalse($workshop3->check_group_membership($student3->id));
+
+        $this->setUser($tutor2);
+        $this->assertFalse($workshop3->check_group_membership($student1->id));
+        $this->assertTrue($workshop3->check_group_membership($student2->id));
+        $this->assertFalse($workshop3->check_group_membership($student3->id));
+    }
 }

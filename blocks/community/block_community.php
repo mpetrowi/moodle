@@ -1,5 +1,4 @@
-<?PHP
-
+<?php
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -15,9 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
-/*
- * @package    blocks
- * @subpackage community
+/**
+ * @package block_community
  * @author     Jerome Mouneyrac <jerome@mouneyrac.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL
  * @copyright  (C) 1999 onwards Martin Dougiamas  http://dougiamas.com
@@ -68,11 +66,10 @@ class block_community extends block_list {
             return $this->content;
         }
 
-        $icon = html_writer::empty_tag('img', array('src' => $OUTPUT->pix_url('i/group'),
-                    'class' => 'icon', 'alt' => get_string('addcourse', 'block_community')));
+        $icon = $OUTPUT->pix_icon('i/group', get_string('group'));
         $addcourseurl = new moodle_url('/blocks/community/communitycourse.php',
                         array('add' => true, 'courseid' => $this->page->course->id));
-        $searchlink = html_writer::tag('a', $icon . '&nbsp;' . get_string('addcourse', 'block_community'),
+        $searchlink = html_writer::tag('a', $icon . get_string('addcourse', 'block_community'),
                         array('href' => $addcourseurl->out(false)));
         $this->content->items[] = $searchlink;
 
@@ -86,9 +83,7 @@ class block_community extends block_list {
             $this->content->icons[] = '';
             foreach ($courses as $course) {
                 //delete link
-                $deleteicon = html_writer::empty_tag('img',
-                                array('src' => $OUTPUT->pix_url('t/delete'),
-                                    'alt' => get_string('removecommunitycourse', 'block_community')));
+                $deleteicon = $OUTPUT->pix_icon('t/delete', get_string('removecommunitycourse', 'block_community'));
                 $deleteurl = new moodle_url('/blocks/community/communitycourse.php',
                                 array('remove' => true,
                                     'courseid' => $this->page->course->id,

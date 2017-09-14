@@ -20,8 +20,7 @@
  * Please note when unenrolling a user all of their grades are removed as well,
  * most ppl actually expect enrolments to be suspended only...
  *
- * @package    core
- * @subpackage enrol
+ * @package    core_enrol
  * @copyright  2011 Petr skoda
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -59,8 +58,7 @@ if (!$plugin->allow_unenrol_user($instance, $ue) or !has_capability("enrol/$inst
 $manager = new course_enrolment_manager($PAGE, $course, $filter);
 $table = new course_enrolment_users_table($manager, $PAGE);
 
-$returnurl = new moodle_url('/enrol/users.php', array('id' => $course->id)+$manager->get_url_params()+$table->get_url_params());
-$usersurl = new moodle_url('/enrol/users.php', array('id' => $course->id));
+$usersurl = new moodle_url('/user/index.php', array('id' => $course->id));
 
 $PAGE->set_pagelayout('admin');
 navigation_node::override_active_url($usersurl);
@@ -68,7 +66,7 @@ navigation_node::override_active_url($usersurl);
 // If the unenrolment has been confirmed and the sesskey is valid unenrol the user.
 if ($confirm && confirm_sesskey()) {
     $plugin->unenrol_user($instance, $ue->userid);
-    redirect($returnurl);
+    redirect($usersurl);
 }
 
 $yesurl = new moodle_url($PAGE->url, array('confirm'=>1, 'sesskey'=>sesskey()));
@@ -83,5 +81,5 @@ $PAGE->navbar->add($fullname);
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading($fullname);
-echo $OUTPUT->confirm($message, $yesurl, $returnurl);
+echo $OUTPUT->confirm($message, $yesurl, $usersurl);
 echo $OUTPUT->footer();

@@ -18,8 +18,7 @@
 /**
  * Provides the interface for overall authoring of lessons
  *
- * @package    mod
- * @subpackage lesson
+ * @package mod_lesson
  * @copyright  1999 onwards Martin Dougiamas  {@link http://moodle.com}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  **/
@@ -29,7 +28,7 @@ require_once($CFG->dirroot.'/mod/lesson/locallib.php');
 
 $id = required_param('id', PARAM_INT);
 
-$cm = get_coursemodule_from_id('lesson', $id, 0, false, MUST_EXIST);;
+$cm = get_coursemodule_from_id('lesson', $id, 0, false, MUST_EXIST);
 $course = $DB->get_record('course', array('id' => $cm->course), '*', MUST_EXIST);
 $lesson = new lesson($DB->get_record('lesson', array('id' => $cm->instance), '*', MUST_EXIST));
 
@@ -39,7 +38,12 @@ $context = context_module::instance($cm->id);
 require_capability('mod/lesson:manage', $context);
 
 $mode    = optional_param('mode', get_user_preferences('lesson_view', 'collapsed'), PARAM_ALPHA);
+// Ensure a valid mode is set.
+if (!in_array($mode, array('single', 'full', 'collapsed'))) {
+    $mode = 'collapsed';
+}
 $PAGE->set_url('/mod/lesson/edit.php', array('id'=>$cm->id,'mode'=>$mode));
+$PAGE->force_settings_menu();
 
 if ($mode != get_user_preferences('lesson_view', 'collapsed') && $mode !== 'single') {
     set_user_preference('lesson_view', $mode);

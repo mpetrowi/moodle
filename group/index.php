@@ -45,6 +45,7 @@ $returnurl = $CFG->wwwroot.'/group/index.php?id='.$courseid;
 $course = $DB->get_record('course', array('id'=>$courseid), '*', MUST_EXIST);
 
 $url = new moodle_url('/group/index.php', array('id'=>$courseid));
+navigation_node::override_active_url($url);
 if ($userid) {
     $url->param('user', $userid);
 }
@@ -56,12 +57,11 @@ $PAGE->set_url($url);
 // Make sure that the user has permissions to manage groups.
 require_login($course);
 
-$PAGE->requires->js('/group/clientlib.js');
-
 $context = context_course::instance($course->id);
-if (!has_capability('moodle/course:managegroups', $context)) {
-    redirect('/course/view.php', array('id'=>$course->id)); // Not allowed to manage all groups
-}
+require_capability('moodle/course:managegroups', $context);
+
+$PAGE->requires->js('/group/clientlib.js');
+$PAGE->requires->js('/group/module.js');
 
 // Check for multiple/no group errors
 if (!$singlegroup) {
@@ -80,7 +80,7 @@ switch ($action) {
 
     case 'ajax_getmembersingroup':
         $roles = array();
-        if ($groupmemberroles = groups_get_members_by_role($groupids[0], $courseid, 'u.id, u.firstname, u.lastname')) {
+        if ($groupmemberroles = groups_get_members_by_role($groupids[0], $courseid, 'u.id, ' . get_all_user_name_fields(true, 'u'))) {
             foreach($groupmemberroles as $roleid=>$roledata) {
                 $shortroledata = new stdClass();
                 $shortroledata->name = $roledata->name;
@@ -146,63 +146,30 @@ $strparticipants = get_string('participants');
 /// Print header
 $PAGE->set_title($strgroups);
 $PAGE->set_heading($course->fullname);
-$PAGE->set_pagelayout('admin');
+$PAGE->set_pagelayout('standard');
 echo $OUTPUT->header();
 
 // Add tabs
 $currenttab = 'groups';
 require('tabs.php');
 
-$disabled = 'disabled="disabled"';
-if (ajaxenabled()) {
-    // Some buttons are enabled if single group selected
-    $showaddmembersform_disabled = $singlegroup ? '' : $disabled;
-    $showeditgroupsettingsform_disabled = $singlegroup ? '' : $disabled;
-    $deletegroup_disabled = count($groupids)>0 ? '' : $disabled;
-} else {
-    // Do not disable buttons. The buttons work based on the selected group,
-    // which you can change without reloading the page, so it is not appropriate
-    // to disable them if no group is selected.
-    $showaddmembersform_disabled = '';
-    $showeditgroupsettingsform_disabled = '';
-    $deletegroup_disabled = '';
-}
-
 echo $OUTPUT->heading(format_string($course->shortname, true, array('context' => $context)) .' '.$strgroups, 3);
-echo '<form id="groupeditform" action="index.php" method="post">'."\n";
-echo '<div>'."\n";
-echo '<input type="hidden" name="id" value="' . $courseid . '" />'."\n";
-
-echo '<table cellpadding="6" class="generaltable generalbox groupmanagementtable boxaligncenter" summary="">'."\n";
-echo '<tr>'."\n";
-
-
-echo "<td>\n";
-echo '<p><label for="groups"><span id="groupslabel">'.get_string('groups').':</span><span id="thegrouping">&nbsp;</span></label></p>'."\n";
-
-if (ajaxenabled()) { // TODO: move this to JS init!
-    $onchange = 'M.core_group.membersCombo.refreshMembers();';
-} else {
-    $onchange = '';
-}
-
-echo '<select name="groups[]" multiple="multiple" id="groups" size="15" class="select" onchange="'.$onchange.'"'."\n";
-echo ' onclick="window.status=this.selectedIndex==-1 ? \'\' : this.options[this.selectedIndex].title;" onmouseout="window.status=\'\';">'."\n";
 
 $groups = groups_get_all_groups($courseid);
-$selectedname = '&nbsp;';
+$selectedname = null;
 $preventgroupremoval = array();
 
+// Get list of groups to render.
+$groupoptions = array();
 if ($groups) {
-    // Print out the HTML
     foreach ($groups as $group) {
-        $select = '';
-        $usercount = $DB->count_records('groups_members', array('groupid'=>$group->id));
-        $groupname = format_string($group->name).' ('.$usercount.')';
-        if (in_array($group->id,$groupids)) {
-            $select = ' selected="selected"';
+        $selected = false;
+        $usercount = $DB->count_records('groups_members', array('groupid' => $group->id));
+        $groupname = format_string($group->name) . ' (' . $usercount . ')';
+        if (in_array($group->id, $groupids)) {
+            $selected = true;
             if ($singlegroup) {
-                // Only keep selected name if there is one group selected
+                // Only keep selected name if there is one group selected.
                 $selectedname = $groupname;
             }
         }
@@ -210,77 +177,41 @@ if ($groups) {
             $preventgroupremoval[$group->id] = true;
         }
 
-        echo "<option value=\"{$group->id}\"$select title=\"$groupname\">$groupname</option>\n";
+        $groupoptions[] = (object) [
+            'value' => $group->id,
+            'selected' => $selected,
+            'text' => $groupname
+        ];
     }
-} else {
-    // Print an empty option to avoid the XHTML error of having an empty select element
-    echo '<option>&nbsp;</option>';
 }
 
-echo '</select>'."\n";
-echo '<p><input type="submit" name="act_updatemembers" id="updatemembers" value="'
-        . get_string('showmembersforgroup', 'group') . '" /></p>'."\n";
-echo '<p><input type="submit" '. $showeditgroupsettingsform_disabled . ' name="act_showgroupsettingsform" id="showeditgroupsettingsform" value="'
-        . get_string('editgroupsettings', 'group') . '" /></p>'."\n";
-echo '<p><input type="submit" '. $deletegroup_disabled . ' name="act_deletegroup" id="deletegroup" value="'
-        . get_string('deleteselectedgroup', 'group') . '" /></p>'."\n";
-
-echo '<p><input type="submit" name="act_showcreateorphangroupform" id="showcreateorphangroupform" value="'
-        . get_string('creategroup', 'group') . '" /></p>'."\n";
-
-echo '<p><input type="submit" name="act_showautocreategroupsform" id="showautocreategroupsform" value="'
-        . get_string('autocreategroups', 'group') . '" /></p>'."\n";
-
-echo '<p><input type="submit" name="act_showimportgroups" id="showimportgroups" value="'
-        . get_string('importgroups', 'core_group') . '" /></p>'."\n";
-
-echo '</td>'."\n";
-echo '<td>'."\n";
-
-echo '<p><label for="members"><span id="memberslabel">'.
-    get_string('membersofselectedgroup', 'group').
-    ' </span><span id="thegroup">'.$selectedname.'</span></label></p>'."\n";
-//NOTE: the SELECT was, multiple="multiple" name="user[]" - not used and breaks onclick.
-echo '<select name="user" id="members" size="15" class="select"'."\n";
-echo ' onclick="window.status=this.options[this.selectedIndex].title;" onmouseout="window.status=\'\';">'."\n";
-
-$member_names = array();
-
-$atleastonemember = false;
+// Get list of group members to render if there is a single selected group.
+$members = array();
 if ($singlegroup) {
-    if ($groupmemberroles = groups_get_members_by_role($groupids[0], $courseid, 'u.id, u.firstname, u.lastname')) {
-        foreach($groupmemberroles as $roleid=>$roledata) {
-            echo '<optgroup label="'.s($roledata->name).'">';
-            foreach($roledata->users as $member) {
-                echo '<option value="'.$member->id.'">'.fullname($member, true).'</option>';
-                $atleastonemember = true;
+    $usernamefields = get_all_user_name_fields(true, 'u');
+    if ($groupmemberroles = groups_get_members_by_role(reset($groupids), $courseid, 'u.id, ' . $usernamefields)) {
+        foreach ($groupmemberroles as $roleid => $roledata) {
+            $users = array();
+            foreach ($roledata->users as $member) {
+                $users[] = (object)[
+                    'value' => $member->id,
+                    'text' => fullname($member, true)
+                ];
             }
-            echo '</optgroup>';
+            $members[] = (object)[
+                'role' => s($roledata->name),
+                'rolemembers' => $users
+            ];
         }
     }
 }
 
-if (!$atleastonemember) {
-    // Print an empty option to avoid the XHTML error of having an empty select element
-    echo '<option>&nbsp;</option>';
-}
-
-echo '</select>'."\n";
-
-echo '<p><input type="submit" ' . $showaddmembersform_disabled . ' name="act_showaddmembersform" '
-        . 'id="showaddmembersform" value="' . get_string('adduserstogroup', 'group'). '" /></p>'."\n";
-echo '</td>'."\n";
-echo '</tr>'."\n";
-echo '</table>'."\n";
-
-//<input type="hidden" name="rand" value="om" />
-echo '</div>'."\n";
-echo '</form>'."\n";
-
-if (ajaxenabled()) {
-    $PAGE->requires->js_init_call('M.core_group.init_index', array($CFG->wwwroot, $courseid));
-    $PAGE->requires->js_init_call('M.core_group.groupslist', array($preventgroupremoval));
-}
+$disableaddedit = !$singlegroup;
+$disabledelete = !empty($groupids);
+$renderable = new \core_group\output\index_page($courseid, $groupoptions, $selectedname, $members, $disableaddedit, $disabledelete,
+        $preventgroupremoval);
+$output = $PAGE->get_renderer('core_group');
+echo $output->render($renderable);
 
 echo $OUTPUT->footer();
 

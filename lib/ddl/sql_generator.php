@@ -226,11 +226,13 @@ abstract class sql_generator {
             $tablename = $table->getName();
         }
 
-        // get all tables in moodle database
-        $tables = $this->mdb->get_tables();
-        $exists = in_array($tablename, $tables);
+        if ($this->temptables->is_temptable($tablename)) {
+            return true;
+        }
 
-        return $exists;
+        // Get all tables in moodle database.
+        $tables = $this->mdb->get_tables();
+        return isset($tables[$tablename]);
     }
 
     /**
@@ -1072,8 +1074,11 @@ abstract class sql_generator {
         // along all the request life, but never to return cached results
         // We need this because sql statements are created before executing
         // them, hence names doesn't exist "physically" yet in DB, so we need
-        // to known which ones have been used
-        static $used_names = array();
+        // to known which ones have been used.
+        // We track all the keys used, and the previous counters to make subsequent creates faster.
+        // This may happen a lot with things like bulk backups or restores.
+        static $usednames = array();
+        static $previouscounters = array();
 
         // Use standard naming. See http://docs.moodle.org/en/XMLDB_key_and_index_naming
         $tablearr = explode ('_', $tablename);
@@ -1086,44 +1091,32 @@ abstract class sql_generator {
             $name .= substr(trim($field),0,3);
         }
         // Prepend the prefix
-        $name = $this->prefix . $name;
+        $name = trim($this->prefix . $name);
 
-        $name = substr(trim($name), 0, $this->names_max_length - 1 - strlen($suffix)); //Max names_max_length
+        // Make sure name does not exceed the maximum name length and add suffix.
+        $maxlengthwithoutsuffix = $this->names_max_length - strlen($suffix) - ($suffix ? 1 : 0);
+        $namewithsuffix = substr($name, 0, $maxlengthwithoutsuffix) . ($suffix ? ('_' . $suffix) : '');
 
-        // Add the suffix
-        $namewithsuffix = $name;
-        if ($suffix) {
-            $namewithsuffix = $namewithsuffix . '_' . $suffix;
+        if (isset($previouscounters[$name])) {
+            // If we have a counter stored, we will need to modify the key to the next counter location.
+            $counter = $previouscounters[$name] + 1;
+            $namewithsuffix = substr($name, 0, $maxlengthwithoutsuffix - strlen($counter)) .
+                    $counter . ($suffix ? ('_' . $suffix) : '');
+        } else {
+            $counter = 1;
         }
 
-        // If the calculated name is in the cache, or if we detect it by introspecting the DB let's modify if
-        if (in_array($namewithsuffix, $used_names) || $this->isNameInUse($namewithsuffix, $suffix, $tablename)) {
-            $counter = 2;
-            // If have free space, we add 2
-            if (strlen($namewithsuffix) < $this->names_max_length) {
-                $newname = $name . $counter;
-            // Else replace the last char by 2
-            } else {
-                $newname = substr($name, 0, strlen($name)-1) . $counter;
-            }
-            $newnamewithsuffix = $newname;
-            if ($suffix) {
-                $newnamewithsuffix = $newnamewithsuffix . '_' . $suffix;
-            }
+        // If the calculated name is in the cache, or if we detect it by introspecting the DB let's modify it.
+        while (isset($usednames[$namewithsuffix]) || $this->isNameInUse($namewithsuffix, $suffix, $tablename)) {
             // Now iterate until not used name is found, incrementing the counter
-            while (in_array($newnamewithsuffix, $used_names) || $this->isNameInUse($newnamewithsuffix, $suffix, $tablename)) {
-                $counter++;
-                $newname = substr($name, 0, strlen($newname)-1) . $counter;
-                $newnamewithsuffix = $newname;
-                if ($suffix) {
-                    $newnamewithsuffix = $newnamewithsuffix . '_' . $suffix;
-                }
-            }
-            $namewithsuffix = $newnamewithsuffix;
+            $counter++;
+            $namewithsuffix = substr($name, 0, $maxlengthwithoutsuffix - strlen($counter)) .
+                    $counter . ($suffix ? ('_' . $suffix) : '');
         }
 
-        // Add the name to the cache
-        $used_names[] = $namewithsuffix;
+        // Add the name to the cache. Using key look with isset because it is much faster than in_array.
+        $usednames[$namewithsuffix] = true;
+        $previouscounters[$name] = $counter;
 
         // Quote it if necessary (reserved words)
         $namewithsuffix = $this->getEncQuoted($namewithsuffix);

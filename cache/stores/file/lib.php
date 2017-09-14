@@ -37,7 +37,7 @@
  * @copyright  2012 Sam Hemelryk
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class cachestore_file implements cache_store, cache_is_key_aware {
+class cachestore_file extends cache_store implements cache_is_key_aware, cache_is_configurable, cache_is_searchable  {
 
     /**
      * The name of the store.
@@ -46,16 +46,30 @@ class cachestore_file implements cache_store, cache_is_key_aware {
     protected $name;
 
     /**
-     * The path to use for the file storage.
+     * The path used to store files for this store and the definition it was initialised with.
      * @var string
      */
-    protected $path = null;
+    protected $path = false;
+
+    /**
+     * The path in which definition specific sub directories will be created for caching.
+     * @var string
+     */
+    protected $filestorepath = false;
 
     /**
      * Set to true when a prescan has been performed.
      * @var bool
      */
     protected $prescan = false;
+
+    /**
+     * Set to true if we should store files within a single directory.
+     * By default we use a nested structure in order to reduce the chance of conflicts and avoid any file system
+     * limitations such as maximum files per directory.
+     * @var bool
+     */
+    protected $singledirectory = false;
 
     /**
      * Set to true when the path should be automatically created if it does not yet exist.
@@ -88,6 +102,19 @@ class cachestore_file implements cache_store, cache_is_key_aware {
     protected $definition;
 
     /**
+     * A reference to the global $CFG object.
+     *
+     * You may be asking yourself why on earth this is here, but there is a good reason.
+     * By holding onto a reference of the $CFG object we can be absolutely sure that it won't be destroyed before
+     * we are done with it.
+     * This makes it possible to use a cache within a destructor method for the purposes of
+     * delayed writes. Like how the session mechanisms work.
+     *
+     * @var stdClass
+     */
+    private $cfg = null;
+
+    /**
      * Constructs the store instance.
      *
      * Noting that this function is not an initialisation. It is used to prepare the store for use.
@@ -97,6 +124,13 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      * @param array $configuration
      */
     public function __construct($name, array $configuration = array()) {
+        global $CFG;
+
+        if (isset($CFG)) {
+            // Hold onto a reference of the global $CFG object.
+            $this->cfg = $CFG;
+        }
+
         $this->name = $name;
         if (array_key_exists('path', $configuration) && $configuration['path'] !== '') {
             $this->custompath = true;
@@ -115,14 +149,40 @@ class cachestore_file implements cache_store, cache_is_key_aware {
             }
             if ($path !== false && !is_writable($path)) {
                 $path = false;
-                debugging('The given file cache store path is not writable. '.$path, DEBUG_DEVELOPER);
+                debugging('The file cache store path is not writable for `'.$name.'`', DEBUG_DEVELOPER);
             }
         } else {
             $path = make_cache_directory('cachestore_file/'.preg_replace('#[^a-zA-Z0-9\.\-_]+#', '', $name));
         }
         $this->isready = $path !== false;
+        $this->filestorepath = $path;
+        // This will be updated once the store has been initialised for a definition.
         $this->path = $path;
-        $this->prescan = array_key_exists('prescan', $configuration) ? (bool)$configuration['prescan'] : false;
+
+        // Check if we should prescan the directory.
+        if (array_key_exists('prescan', $configuration)) {
+            $this->prescan = (bool)$configuration['prescan'];
+        } else {
+            // Default is no, we should not prescan.
+            $this->prescan = false;
+        }
+        // Check if we should be storing in a single directory.
+        if (array_key_exists('singledirectory', $configuration)) {
+            $this->singledirectory = (bool)$configuration['singledirectory'];
+        } else {
+            // Default: No, we will use multiple directories.
+            $this->singledirectory = false;
+        }
+    }
+
+    /**
+     * Performs any necessary operation when the file store instance has been created.
+     */
+    public function instance_created() {
+        if ($this->isready && !$this->prescan) {
+            // It is supposed the store instance to expect an empty folder.
+            $this->purge_all_definitions();
+        }
     }
 
     /**
@@ -130,7 +190,7 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      * @return bool
      */
     public function is_ready() {
-        return ($this->path !== null);
+        return $this->isready;
     }
 
     /**
@@ -150,8 +210,21 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      */
     public static function get_supported_features(array $configuration = array()) {
         $supported = self::SUPPORTS_DATA_GUARANTEE +
-                     self::SUPPORTS_NATIVE_TTL;
+                     self::SUPPORTS_NATIVE_TTL +
+                     self::IS_SEARCHABLE +
+                     self::DEREFERENCES_OBJECTS;
         return $supported;
+    }
+
+    /**
+     * Returns false as this store does not support multiple identifiers.
+     * (This optional function is a performance optimisation; it must be
+     * consistent with the value from get_supported_features.)
+     *
+     * @return bool False
+     */
+    public function supports_multiple_identifiers() {
+        return false;
     }
 
     /**
@@ -184,33 +257,6 @@ class cachestore_file implements cache_store, cache_is_key_aware {
     }
 
     /**
-     * Returns true if the store instance supports multiple identifiers.
-     *
-     * @return bool
-     */
-    public function supports_multiple_indentifiers() {
-        return false;
-    }
-
-    /**
-     * Returns true if the store instance guarantees data.
-     *
-     * @return bool
-     */
-    public function supports_data_guarantee() {
-        return true;
-    }
-
-    /**
-     * Returns true if the store instance supports native ttl.
-     *
-     * @return bool
-     */
-    public function supports_native_ttl() {
-        return true;
-    }
-
-    /**
      * Initialises the cache.
      *
      * Once this has been done the cache is all set to be used.
@@ -220,16 +266,64 @@ class cachestore_file implements cache_store, cache_is_key_aware {
     public function initialise(cache_definition $definition) {
         $this->definition = $definition;
         $hash = preg_replace('#[^a-zA-Z0-9]+#', '_', $this->definition->get_id());
-        $this->path .= '/'.$hash;
-        make_writable_directory($this->path);
+        $this->path = $this->filestorepath.'/'.$hash;
+        make_writable_directory($this->path, false);
         if ($this->prescan && $definition->get_mode() !== self::MODE_REQUEST) {
             $this->prescan = false;
         }
         if ($this->prescan) {
-            $pattern = $this->path.'/*.cache';
-            foreach (glob($pattern, GLOB_MARK | GLOB_NOSORT) as $filename) {
+            $this->prescan_keys();
+        }
+    }
+
+    /**
+     * Pre-scan the cache to see which keys are present.
+     */
+    protected function prescan_keys() {
+        $files = glob($this->glob_keys_pattern(), GLOB_MARK | GLOB_NOSORT);
+        if (is_array($files)) {
+            foreach ($files as $filename) {
                 $this->keys[basename($filename)] = filemtime($filename);
             }
+        }
+    }
+
+    /**
+     * Gets a pattern suitable for use with glob to find all keys in the cache.
+     *
+     * @param string $prefix A prefix to use.
+     * @return string The pattern.
+     */
+    protected function glob_keys_pattern($prefix = '') {
+        if ($this->singledirectory) {
+            return $this->path . '/'.$prefix.'*.cache';
+        } else {
+            return $this->path . '/*/'.$prefix.'*.cache';
+        }
+    }
+
+    /**
+     * Returns the file path to use for the given key.
+     *
+     * @param string $key The key to generate a file path for.
+     * @param bool $create If set to the true the directory structure the key requires will be created.
+     * @return string The full path to the file that stores a particular cache key.
+     */
+    protected function file_path_for_key($key, $create = false) {
+        if ($this->singledirectory) {
+            // Its a single directory, easy, just the store instances path + the file name.
+            return $this->path . '/' . $key . '.cache';
+        } else {
+            // We are using a single subdirectory to achieve 1 level.
+           // We suffix the subdir so it does not clash with any windows
+           // reserved filenames like 'con'.
+            $subdir = substr($key, 0, 3) . '-cache';
+            $dir = $this->path . '/' . $subdir;
+            if ($create) {
+                // Create the directory. This function does it recursivily!
+                make_writable_directory($dir, false);
+            }
+            return $dir . '/' . $key . '.cache';
         }
     }
 
@@ -241,14 +335,15 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      */
     public function get($key) {
         $filename = $key.'.cache';
-        $file = $this->path.'/'.$filename;
+        $file = $this->file_path_for_key($key);
         $ttl = $this->definition->get_ttl();
+        $maxtime = 0;
         if ($ttl) {
             $maxtime = cache::now() - $ttl;
         }
         $readfile = false;
-        if ($this->prescan && array_key_exists($key, $this->keys)) {
-            if (!$ttl || $this->keys[$filename] >= $maxtime && file_exists($file)) {
+        if ($this->prescan && array_key_exists($filename, $this->keys)) {
+            if ((!$ttl || $this->keys[$filename] >= $maxtime) && file_exists($file)) {
                 $readfile = true;
             } else {
                 $this->delete($key);
@@ -259,23 +354,19 @@ class cachestore_file implements cache_store, cache_is_key_aware {
         if (!$readfile) {
             return false;
         }
-        // Check the filesize first, likely not needed but important none the less.
-        $filesize = filesize($file);
-        if (!$filesize) {
-            return false;
-        }
-        // Open ensuring the file for writing, truncating it and setting the pointer to the start.
+        // Open ensuring the file for reading in binary format.
         if (!$handle = fopen($file, 'rb')) {
             return false;
         }
         // Lock it up!
         // We don't care if this succeeds or not, on some systems it will, on some it won't, meah either way.
         flock($handle, LOCK_SH);
-        // HACK ALERT
-        // There is a problem when reading from the file during PHPUNIT tests. For one reason or another the filesize is not correct
-        // Doesn't happen during normal operation, just during unit tests.
-        // Read it.
-        $data = fread($handle, $filesize+128);
+        $data = '';
+        // Read the data in 1Mb chunks. Small caches will not loop more than once.  We don't use filesize as it may
+        // be cached with a different value than what we need to read from the file.
+        do {
+            $data .= fread($handle, 1048576);
+        } while (!feof($handle));
         // Unlock it.
         flock($handle, LOCK_UN);
         // Return it unserialised.
@@ -307,10 +398,13 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      */
     public function delete($key) {
         $filename = $key.'.cache';
-        $file = $this->path.'/'.$filename;
-        $result = @unlink($file);
-        unset($this->keys[$filename]);
-        return $result;
+        $file = $this->file_path_for_key($key);
+        if (@unlink($file)) {
+            unset($this->keys[$filename]);
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -339,7 +433,7 @@ class cachestore_file implements cache_store, cache_is_key_aware {
     public function set($key, $data) {
         $this->ensure_path_exists();
         $filename = $key.'.cache';
-        $file = $this->path.'/'.$filename;
+        $file = $this->file_path_for_key($key, true);
         $result = $this->write_file($file, $this->prep_data_before_save($data));
         if (!$result) {
             // Couldn't write the file.
@@ -404,11 +498,11 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      */
     public function has($key) {
         $filename = $key.'.cache';
-        $file = $this->path.'/'.$key.'.cache';
         $maxtime = cache::now() - $this->definition->get_ttl();
         if ($this->prescan) {
             return array_key_exists($filename, $this->keys) && $this->keys[$filename] >= $maxtime;
         }
+        $file = $this->file_path_for_key($key);
         return (file_exists($file) && ($this->definition->get_ttl() == 0 || filemtime($file) >= $maxtime));
     }
 
@@ -443,17 +537,85 @@ class cachestore_file implements cache_store, cache_is_key_aware {
     }
 
     /**
-     * Purges the cache deleting all items within it.
+     * Purges the cache definition deleting all the items within it.
      *
      * @return boolean True on success. False otherwise.
      */
     public function purge() {
-        $pattern = $this->path.'/*.cache';
-        foreach (glob($pattern, GLOB_MARK | GLOB_NOSORT) as $filename) {
-            @unlink($filename);
+        if ($this->isready) {
+            $files = glob($this->glob_keys_pattern(), GLOB_MARK | GLOB_NOSORT);
+            if (is_array($files)) {
+                foreach ($files as $filename) {
+                    @unlink($filename);
+                }
+            }
+            $this->keys = array();
         }
-        $this->keys = array();
         return true;
+    }
+
+    /**
+     * Purges all the cache definitions deleting all items within them.
+     *
+     * @return boolean True on success. False otherwise.
+     */
+    protected function purge_all_definitions() {
+        // Warning: limit the deletion to what file store is actually able
+        // to create using the internal {@link purge()} providing the
+        // {@link $path} with a wildcard to perform a purge action over all the definitions.
+        $currpath = $this->path;
+        $this->path = $this->filestorepath.'/*';
+        $result = $this->purge();
+        $this->path = $currpath;
+        return $result;
+    }
+
+    /**
+     * Given the data from the add instance form this function creates a configuration array.
+     *
+     * @param stdClass $data
+     * @return array
+     */
+    public static function config_get_configuration_array($data) {
+        $config = array();
+
+        if (isset($data->path)) {
+            $config['path'] = $data->path;
+        }
+        if (isset($data->autocreate)) {
+            $config['autocreate'] = $data->autocreate;
+        }
+        if (isset($data->singledirectory)) {
+            $config['singledirectory'] = $data->singledirectory;
+        }
+        if (isset($data->prescan)) {
+            $config['prescan'] = $data->prescan;
+        }
+
+        return $config;
+    }
+
+    /**
+     * Allows the cache store to set its data against the edit form before it is shown to the user.
+     *
+     * @param moodleform $editform
+     * @param array $config
+     */
+    public static function config_set_edit_form_data(moodleform $editform, array $config) {
+        $data = array();
+        if (!empty($config['path'])) {
+            $data['path'] = $config['path'];
+        }
+        if (isset($config['autocreate'])) {
+            $data['autocreate'] = (bool)$config['autocreate'];
+        }
+        if (isset($config['singledirectory'])) {
+            $data['singledirectory'] = (bool)$config['singledirectory'];
+        }
+        if (isset($config['prescan'])) {
+            $data['prescan'] = (bool)$config['prescan'];
+        }
+        $editform->set_data($data);
     }
 
     /**
@@ -463,35 +625,40 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      * @throws coding_exception
      */
     protected function ensure_path_exists() {
+        global $CFG;
         if (!is_writable($this->path)) {
             if ($this->custompath && !$this->autocreate) {
                 throw new coding_exception('File store path does not exist. It must exist and be writable by the web server.');
             }
+            $createdcfg = false;
+            if (!isset($CFG)) {
+                // This can only happen during destruction of objects.
+                // A cache is being used within a destructor, php is ending a request and $CFG has
+                // already being cleaned up.
+                // Rebuild $CFG with directory permissions just to complete this write.
+                $CFG = $this->cfg;
+                $createdcfg = true;
+            }
             if (!make_writable_directory($this->path, false)) {
                 throw new coding_exception('File store path does not exist and can not be created.');
+            }
+            if ($createdcfg) {
+                // We re-created it so we'll clean it up.
+                unset($CFG);
             }
         }
         return true;
     }
 
     /**
-     * Returns true if the user can add an instance of the store plugin.
-     *
-     * @return bool
-     */
-    public static function can_add_instance() {
-        return true;
-    }
-
-    /**
-     * Performs any necessary clean up when the store instance is being deleted.
+     * Performs any necessary clean up when the file store instance is being deleted.
      *
      * 1. Purges the cache directory.
-     * 2. Deletes the directory we created for this cache instances data.
+     * 2. Deletes the directory we created for the given definition.
      */
-    public function cleanup() {
-        $this->purge();
-        @rmdir($this->path);
+    public function instance_deleted() {
+        $this->purge_all_definitions();
+        @rmdir($this->filestorepath);
     }
 
     /**
@@ -506,8 +673,19 @@ class cachestore_file implements cache_store, cache_is_key_aware {
         $name = 'File test';
         $path = make_cache_directory('cachestore_file_test');
         $cache = new cachestore_file($name, array('path' => $path));
-        $cache->initialise($definition);
+        if ($cache->is_ready()) {
+            $cache->initialise($definition);
+        }
         return $cache;
+    }
+
+    /**
+     * Generates the appropriate configuration required for unit testing.
+     *
+     * @return array Array of unit test configuration data to be used by initialise().
+     */
+    public static function unit_test_configuration() {
+        return array();
     }
 
     /**
@@ -553,6 +731,7 @@ class cachestore_file implements cache_store, cache_is_key_aware {
 
         // Finally rename the temp file to the desired file, returning the true|false result.
         $result = rename($tempfile, $file);
+        @chmod($file, $this->cfg->filepermissions);
         if (!$result) {
             // Failed to rename, don't leave files lying around.
             @unlink($tempfile);
@@ -566,5 +745,43 @@ class cachestore_file implements cache_store, cache_is_key_aware {
      */
     public function my_name() {
         return $this->name;
+    }
+
+    /**
+     * Finds all of the keys being used by this cache store instance.
+     *
+     * @return array
+     */
+    public function find_all() {
+        $this->ensure_path_exists();
+        $files = glob($this->glob_keys_pattern(), GLOB_MARK | GLOB_NOSORT);
+        $return = array();
+        if ($files === false) {
+            return $return;
+        }
+        foreach ($files as $file) {
+            $return[] = substr(basename($file), 0, -6);
+        }
+        return $return;
+    }
+
+    /**
+     * Finds all of the keys whose keys start with the given prefix.
+     *
+     * @param string $prefix
+     */
+    public function find_by_prefix($prefix) {
+        $this->ensure_path_exists();
+        $prefix = preg_replace('#(\*|\?|\[)#', '[$1]', $prefix);
+        $files = glob($this->glob_keys_pattern($prefix), GLOB_MARK | GLOB_NOSORT);
+        $return = array();
+        if ($files === false) {
+            return $return;
+        }
+        foreach ($files as $file) {
+            // Trim off ".cache" from the end.
+            $return[] = substr(basename($file), 0, -6);
+        }
+        return $return;
     }
 }

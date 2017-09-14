@@ -57,19 +57,26 @@ M.core_comment = {
                         this.view(0);
                         return false;
                     }, this);
+                    // Also handle space/enter key.
+                    handle.on('key', function(e) {
+                        e.preventDefault();
+                        this.view(0);
+                        return false;
+                    }, '13,32', this);
                 }
                 scope.toggle_textarea(false);
-                CommentHelper.confirmoverlay = new Y.Overlay({
-bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-'+this.client_id+'">'+M.str.moodle.yes+'</a> <a href="#" id="canceldelete-'+this.client_id+'">'+M.str.moodle.no+'</a></div>',
-                                        visible: false
-                                        });
-                CommentHelper.confirmoverlay.render(document.body);
             },
             post: function() {
                 var ta = Y.one('#dlg-content-'+this.client_id);
                 var scope = this;
                 var value = ta.get('value');
-                if (value && value != M.str.moodle.addcomment) {
+                if (value && value != M.util.get_string('addcomment', 'moodle')) {
+                    ta.set('disabled', true);
+                    ta.setStyles({
+                        'backgroundImage': 'url(' + M.util.image_url('i/loading_small', 'core') + ')',
+                        'backgroundRepeat': 'no-repeat',
+                        'backgroundPosition': 'center center'
+                    });
                     var params = {'content': value};
                     this.request({
                         action: 'add',
@@ -80,15 +87,17 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                             var cid = scope.client_id;
                             var ta = Y.one('#dlg-content-'+cid);
                             ta.set('value', '');
+                            ta.set('disabled', false);
+                            ta.setStyle('backgroundImage', 'none');
                             scope.toggle_textarea(false);
                             var container = Y.one('#comment-list-'+cid);
                             var result = scope.render([obj], true);
                             var newcomment = Y.Node.create(result.html);
                             container.appendChild(newcomment);
                             var ids = result.ids;
-                            var linktext = Y.one('#comment-link-text-'+cid);
-                            if (linktext) {
-                                linktext.set('innerHTML', M.str.moodle.comments + ' ('+obj.count+')');
+                            var linkText = Y.one('#comment-link-text-' + cid);
+                            if (linkText) {
+                                linkText.set('innerHTML', M.util.get_string('commentscount', 'moodle', obj.count));
                             }
                             for(var i in ids) {
                                 var attributes = {
@@ -157,8 +166,7 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                         scope: scope
                     },
                     headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'User-Agent': 'MoodleComment/3.0'
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
                     },
                     data: build_querystring(params)
                 };
@@ -184,7 +192,17 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                         val = val.replace('___name___', list[i].fullname);
                     }
                     if (list[i]['delete']||newcmt) {
-                        list[i].content = '<div class="comment-delete"><a href="#" id ="comment-delete-'+this.client_id+'-'+list[i].id+'" title="'+M.str.moodle.deletecomment+'"><img src="'+M.util.image_url('t/delete', 'core')+'" /></a></div>' + list[i].content;
+                        var tokens = {
+                            user: list[i].fullname,
+                            time: list[i].time
+                        };
+                        var deleteStr = Y.Escape.html(M.util.get_string('deletecommentbyon', 'moodle', tokens));
+                        list[i].content = '<div class="comment-delete">' +
+                            '<a href="#" role="button" id ="comment-delete-' + this.client_id + '-' + list[i].id + '"' +
+                            '   title="' + deleteStr + '">' +
+                            '<span></span>' +
+                            '</a>' +
+                            '</div>' + list[i].content;
                     }
                     val = val.replace('___time___', list[i].time);
                     val = val.replace('___picture___', list[i].avatar);
@@ -207,9 +225,9 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                     scope: scope,
                     params: params,
                     callback: function(id, ret, args) {
-                        var linktext = Y.one('#comment-link-text-'+scope.client_id);
-                        if (ret.count && linktext) {
-                            linktext.set('innerHTML', M.str.moodle.comments + ' ('+ret.count+')');
+                        var linkText = Y.one('#comment-link-text-' + scope.client_id);
+                        if (ret.count && linkText) {
+                            linkText.set('innerHTML', M.util.get_string('commentscount', 'moodle', ret.count));
                         }
                         var container = Y.one('#comment-list-'+scope.client_id);
                         var pagination = Y.one('#comment-pagination-'+scope.client_id);
@@ -221,7 +239,7 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                         }
                         if (ret.error == 'require_login') {
                             var result = {};
-                            result.html = M.str.moodle.commentsrequirelogin;
+                            result.html = M.util.get_string('commentsrequirelogin', 'moodle');
                         } else {
                             var result = scope.render(ret.list);
                         }
@@ -237,11 +255,16 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
             },
 
             dodelete: function(id) { // note: delete is a reserved word in javascript, chrome and safary do not like it at all here!
-                var scope = this;
-                var params = {'commentid': id};
-                scope.cancel_delete();
+                var scope = this,
+                    cid = scope.client_id,
+                    params = {'commentid': id};
                 function remove_dom(type, anim, cmt) {
                     cmt.remove();
+                    var linkText = Y.one('#comment-link-text-' + cid),
+                        comments = Y.all('#comment-list-' + cid + ' li');
+                    if (linkText && comments) {
+                        linkText.set('innerHTML', M.util.get_string('commentscount', 'moodle', comments.size()));
+                    }
                 }
                 this.request({
                     action: 'delete',
@@ -295,36 +318,29 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                         if (commentid[1]) {
                             Y.Event.purgeElement('#'+theid, false, 'click');
                         }
-                        node.on('click', function(e, node) {
+                        node.on('click', function(e) {
                             e.preventDefault();
-                            var width = CommentHelper.confirmoverlay.bodyNode.getStyle('width');
-                            var re = new RegExp("(\\d+).*", "i");
-                            var result = width.match(re);
-                            if (result[1]) {
-                                width = Number(result[1]);
-                            } else {
-                                width = 0;
+                            if (commentid[1]) {
+                                scope.dodelete(commentid[1]);
                             }
-                            //CommentHelper.confirmoverlay.set('xy', [e.pageX-(width/2), e.pageY]);
-                            CommentHelper.confirmoverlay.set('xy', [e.pageX-width-5, e.pageY]);
-                            CommentHelper.confirmoverlay.set('visible', true);
-                            Y.one('#canceldelete-'+scope.client_id).on('click', function(e) {
-								e.preventDefault();
-                                scope.cancel_delete();
-                                });
-                            Y.Event.purgeElement('#confirmdelete-'+scope.client_id, false, 'click');
-                            Y.one('#confirmdelete-'+scope.client_id).on('click', function(e) {
-									e.preventDefault();
-                                    if (commentid[1]) {
-                                        scope.dodelete(commentid[1]);
-                                    }
-                                });
-                        }, scope, node);
+                        });
+                        // Also handle space/enter key.
+                        node.on('key', function(e) {
+                            e.preventDefault();
+                            if (commentid[1]) {
+                                scope.dodelete(commentid[1]);
+                            }
+                        }, '13,32');
+                        // 13 and 32 are the keycodes for space and enter.
+
+                        require(['core/templates', 'core/notification'], function(Templates, Notification) {
+                            var title = node.getAttribute('title');
+                            Templates.renderPix('t/delete', 'core', title).then(function(html) {
+                                node.set('innerHTML', html);
+                            }).catch(Notification.exception);
+                        });
                     }
                 );
-            },
-            cancel_delete: function() {
-                CommentHelper.confirmoverlay.set('visible', false);
             },
             register_pagination: function() {
                 var scope = this;
@@ -342,6 +358,7 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                 );
             },
             view: function(page) {
+                var commenttoggler = Y.one('#comment-link-' + this.client_id);
                 var container = Y.one('#comment-ctrl-'+this.client_id);
                 var ta = Y.one('#dlg-content-'+this.client_id);
                 var img = Y.one('#comment-img-'+this.client_id);
@@ -358,6 +375,9 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                     if (img) {
                         img.set('src', M.util.image_url('t/expanded', 'core'));
                     }
+                    if (commenttoggler) {
+                        commenttoggler.setAttribute('aria-expanded', 'true');
+                    }
                 } else {
                     // hide
                     container.setStyle('display', 'none');
@@ -367,15 +387,20 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                     } else {
                         collapsedimage = 't/collapsed';
                     }
-                    img.set('src', M.util.image_url(collapsedimage, 'core'));
+                    if (img) {
+                        img.set('src', M.util.image_url(collapsedimage, 'core'));
+                    }
                     if (ta) {
                         ta.set('value','');
+                    }
+                    if (commenttoggler) {
+                        commenttoggler.setAttribute('aria-expanded', 'false');
                     }
                 }
                 if (ta) {
                     //toggle_textarea.apply(ta, [false]);
                     //// reset textarea size
-                    ta.on('click', function() {
+                    ta.on('focus', function() {
                         this.toggle_textarea(true);
                     }, this);
                     //ta.onkeypress = function() {
@@ -395,13 +420,13 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                     return false;
                 }
                 if (focus) {
-                    if (t.get('value') == M.str.moodle.addcomment) {
+                    if (t.get('value') == M.util.get_string('addcomment', 'moodle')) {
                         t.set('value', '');
                         t.setStyle('color', 'black');
                     }
                 }else{
                     if (t.get('value') == '') {
-                        t.set('value', M.str.moodle.addcomment);
+                        t.set('value', M.util.get_string('addcomment', 'moodle'));
                         t.setStyle('color','grey');
                         t.set('rows', 2);
                     }
@@ -417,19 +442,21 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
     },
     init_admin: function(Y) {
         var select_all = Y.one('#comment_select_all');
-        select_all.on('click', function(e) {
-            var comments = document.getElementsByName('comments');
-            var checked = false;
-            for (var i in comments) {
-                if (comments[i].checked) {
-                    checked=true;
+        if (select_all) {
+            select_all.on('click', function(e) {
+                var comments = document.getElementsByName('comments');
+                var checked = false;
+                for (var i in comments) {
+                    if (comments[i].checked) {
+                        checked=true;
+                    }
                 }
-            }
-            for (i in comments) {
-                comments[i].checked = !checked;
-            }
-            this.set('checked', !checked);
-        });
+                for (i in comments) {
+                    comments[i].checked = !checked;
+                }
+                this.set('checked', !checked);
+            });
+        }
 
         var comments_delete = Y.one('#comments_delete');
         if (comments_delete) {
@@ -446,7 +473,7 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                     return;
                 }
                 var args = {};
-                args.message = M.str.admin.confirmdeletecomments;
+                args.message = M.util.get_string('confirmdeletecomments', 'admin');
                 args.callback = function() {
                     var url = M.cfg.wwwroot + '/comment/index.php';
 
@@ -472,8 +499,7 @@ bodyContent: '<div class="comment-delete-confirm"><a href="#" id="confirmdelete-
                             scope: this
                         },
                         headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                            'User-Agent': 'MoodleComment/3.0'
+                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
                         },
                         data: build_querystring(data)
                     };

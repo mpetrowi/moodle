@@ -18,44 +18,32 @@
  * Test classes for handling embedded media (audio/video).
  *
  * @package core_media
+ * @category phpunit
  * @copyright 2012 The Open University
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
-global $CFG;
-require_once($CFG->libdir . '/medialib.php');
-
 /**
  * Test script for media embedding.
  */
-class medialib_testcase extends advanced_testcase {
-
-    /** @var array Files covered by test */
-    public static $includecoverage = array('lib/medialib.php', 'lib/outputrenderers.php');
+class core_medialib_testcase extends advanced_testcase {
 
     /**
      * Pre-test setup. Preserves $CFG.
      */
     public function setUp() {
-        global $CFG;
         parent::setUp();
 
         // Reset $CFG and $SERVER.
-        $this->resetAfterTest(true);
+        $this->resetAfterTest();
+
+        // "Install" a fake plugin for testing.
+        set_config('version', '2016101400', 'media_test');
 
         // Consistent initial setup: all players disabled.
-        $CFG->core_media_enable_html5video = false;
-        $CFG->core_media_enable_html5audio = false;
-        $CFG->core_media_enable_mp3 = false;
-        $CFG->core_media_enable_flv = false;
-        $CFG->core_media_enable_wmp = false;
-        $CFG->core_media_enable_qt = false;
-        $CFG->core_media_enable_rm = false;
-        $CFG->core_media_enable_youtube = false;
-        $CFG->core_media_enable_vimeo = false;
-        $CFG->core_media_enable_swf = false;
+        \core\plugininfo\media::set_enabled_plugins('');
 
         $_SERVER = array('HTTP_USER_AGENT' => '');
         $this->pretend_to_be_safari();
@@ -66,8 +54,8 @@ class medialib_testcase extends advanced_testcase {
      */
     private function pretend_to_be_safari() {
         // Pretend to be using Safari browser (must support mp4 for tests to work).
-        $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_8; de-at) ' .
-                'AppleWebKit/533.21.1 (KHTML, like Gecko) Version/5.0.5 Safari/533.21.1';
+        core_useragent::instance(true, 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_8; de-at) ' .
+                'AppleWebKit/533.21.1 (KHTML, like Gecko) Version/5.0.5 Safari/533.21.1');
     }
 
     /**
@@ -75,33 +63,20 @@ class medialib_testcase extends advanced_testcase {
      */
     private function pretend_to_be_firefox() {
         // Pretend to be using Firefox browser (must support ogg for tests to work).
-        $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 6.1; rv:8.0) Gecko/20100101 Firefox/8.0';
-    }
-
-    /**
-     * Test for the core_media_player is_enabled.
-     */
-    public function test_is_enabled() {
-        global $CFG;
-
-        // Test enabled: unset, 0, 1.
-        $test = new core_media_player_test;
-        $this->assertFalse($test->is_enabled());
-        $CFG->core_media_enable_test = 0;
-        $this->assertFalse($test->is_enabled());
-        $CFG->core_media_enable_test = 1;
-        $this->assertTrue($test->is_enabled());
+        core_useragent::instance(true, 'Mozilla/5.0 (X11; Linux x86_64; rv:46.0) Gecko/20100101 Firefox/46.0 ');
     }
 
     /**
      * Test for core_media::get_filename.
      */
     public function test_get_filename() {
-        $this->assertEquals('frog.mp4', core_media::get_filename(new moodle_url(
+        $manager = core_media_manager::instance();
+
+        $this->assertSame('frog.mp4', $manager->get_filename(new moodle_url(
                 '/pluginfile.php/312/mod_page/content/7/frog.mp4')));
         // This should work even though slasharguments is true, because we want
         // it to support 'legacy' links if somebody toggles the option later.
-        $this->assertEquals('frog.mp4', core_media::get_filename(new moodle_url(
+        $this->assertSame('frog.mp4', $manager->get_filename(new moodle_url(
                 '/pluginfile.php?file=/312/mod_page/content/7/frog.mp4')));
     }
 
@@ -109,13 +84,15 @@ class medialib_testcase extends advanced_testcase {
      * Test for core_media::get_extension.
      */
     public function test_get_extension() {
-        $this->assertEquals('mp4', core_media::get_extension(new moodle_url(
+        $manager = core_media_manager::instance();
+
+        $this->assertSame('mp4', $manager->get_extension(new moodle_url(
                 '/pluginfile.php/312/mod_page/content/7/frog.mp4')));
-        $this->assertEquals('', core_media::get_extension(new moodle_url(
+        $this->assertSame('', $manager->get_extension(new moodle_url(
                 '/pluginfile.php/312/mod_page/content/7/frog')));
-        $this->assertEquals('mp4', core_media::get_extension(new moodle_url(
+        $this->assertSame('mp4', $manager->get_extension(new moodle_url(
                 '/pluginfile.php?file=/312/mod_page/content/7/frog.mp4')));
-        $this->assertEquals('', core_media::get_extension(new moodle_url(
+        $this->assertSame('', $manager->get_extension(new moodle_url(
                 '/pluginfile.php?file=/312/mod_page/content/7/frog')));
     }
 
@@ -123,8 +100,7 @@ class medialib_testcase extends advanced_testcase {
      * Test for the core_media_player list_supported_urls.
      */
     public function test_list_supported_urls() {
-        global $CFG;
-        $test = new core_media_player_test;
+        $test = new media_test_plugin(1, 13, ['tst', 'test']);
 
         // Some example URLs.
         $supported1 = new moodle_url('http://example.org/1.test');
@@ -156,50 +132,59 @@ class medialib_testcase extends advanced_testcase {
      * Test for core_media_renderer get_players
      */
     public function test_get_players() {
-        global $CFG, $PAGE;
-
         // All players are initially disabled (except link, which you can't).
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertEquals('link', $renderer->get_players_test());
+        $manager = core_media_manager::instance();
+        $this->assertEmpty($this->get_players_test($manager));
 
         // A couple enabled, check the order.
-        $CFG->core_media_enable_html5audio = true;
-        $CFG->core_media_enable_mp3 = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertEquals('mp3, html5audio, link', $renderer->get_players_test());
+        \core\plugininfo\media::set_enabled_plugins('youtube,html5audio');
+        $manager = core_media_manager::instance();
+        $this->assertSame('youtube, html5audio', $this->get_players_test($manager));
+
+        // Test SWF and HTML5 media order.
+        \core\plugininfo\media::set_enabled_plugins('html5video,html5audio,swf');
+        $manager = core_media_manager::instance();
+        $this->assertSame('html5video, html5audio, swf', $this->get_players_test($manager));
+
+        // Make sure that our test plugin is considered installed.
+        \core\plugininfo\media::set_enabled_plugins('test,html5video');
+        $manager = core_media_manager::instance();
+        $this->assertSame('test, html5video', $this->get_players_test($manager));
+
+        // Make sure that non-existing plugin is NOT considered installed.
+        \core\plugininfo\media::set_enabled_plugins('nonexistingplugin,html5video');
+        $manager = core_media_manager::instance();
+        $this->assertSame('html5video', $this->get_players_test($manager));
     }
 
     /**
      * Test for core_media_renderer can_embed_url
      */
     public function test_can_embed_url() {
-        global $CFG, $PAGE;
-
         // All players are initially disabled, so mp4 cannot be rendered.
         $url = new moodle_url('http://example.org/test.mp4');
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertFalse($renderer->can_embed_url($url));
+        $manager = core_media_manager::instance();
+        $this->assertFalse($manager->can_embed_url($url));
 
-        // Enable QT player.
-        $CFG->core_media_enable_qt = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertTrue($renderer->can_embed_url($url));
+        // Enable VideoJS player.
+        \core\plugininfo\media::set_enabled_plugins('videojs');
+        $manager = core_media_manager::instance();
+        $this->assertTrue($manager->can_embed_url($url));
 
-        // QT + html5.
-        $CFG->core_media_enable_html5video = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertTrue($renderer->can_embed_url($url));
+        // VideoJS + html5.
+        \core\plugininfo\media::set_enabled_plugins('videojs,html5video');
+        $manager = core_media_manager::instance();
+        $this->assertTrue($manager->can_embed_url($url));
 
         // Only html5.
-        $CFG->core_media_enable_qt = false;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertTrue($renderer->can_embed_url($url));
+        \core\plugininfo\media::set_enabled_plugins('html5video');
+        $manager = core_media_manager::instance();
+        $this->assertTrue($manager->can_embed_url($url));
 
-        // Only WMP.
-        $CFG->core_media_enable_html5video = false;
-        $CFG->core_media_enable_wmp = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $this->assertFalse($renderer->can_embed_url($url));
+        // Only SWF.
+        \core\plugininfo\media::set_enabled_plugins('swf');
+        $manager = core_media_manager::instance();
+        $this->assertFalse($manager->can_embed_url($url));
     }
 
     /**
@@ -207,60 +192,75 @@ class medialib_testcase extends advanced_testcase {
      * Checks multiple format/fallback support.
      */
     public function test_embed_url_fallbacks() {
-        global $CFG, $PAGE;
+
+        // Key strings in the embed code that identify with the media formats being tested.
+        $swf = '</object>';
+        $html5video = '</video>';
+        $html5audio = '</audio>';
+        $link = 'mediafallbacklink';
+        $test = 'mediaplugin_test';
 
         $url = new moodle_url('http://example.org/test.mp4');
 
         // All plugins disabled, NOLINK option.
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $t = $renderer->embed_url($url, 0, 0, '',
-                array(core_media::OPTION_NO_LINK => true));
+        \core\plugininfo\media::set_enabled_plugins('');
+        $manager = core_media_manager::instance();
+        $t = $manager->embed_url($url, 0, 0, '',
+                array(core_media_manager::OPTION_NO_LINK => true));
         // Completely empty.
-        $this->assertEquals('', $t);
+        $this->assertSame('', $t);
 
         // All plugins disabled but not NOLINK.
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $t = $renderer->embed_url($url);
-        $this->assert_contents(false, false, true, $t);
+        \core\plugininfo\media::set_enabled_plugins('');
+        $manager = core_media_manager::instance();
+        $t = $manager->embed_url($url);
+        $this->assertContains($link, $t);
 
-        // HTML5 plugin enabled.
-        $CFG->core_media_enable_html5video = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $t = $renderer->embed_url($url);
-        $this->assert_contents(false, true, true, $t);
+        // Enable media players that can play the same media formats. (ie. test & html5audio for mp3 files, etc.)
+        \core\plugininfo\media::set_enabled_plugins('test,html5video,html5audio,swf');
+        $manager = core_media_manager::instance();
 
-        // QT plugin enabled as well.
-        $CFG->core_media_enable_qt = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-        $t = $renderer->embed_url($url);
-        $this->assert_contents(true, true, true, $t);
+        // Test media formats that can be played by 2 or more players.
+        $mediaformats = array('mp3', 'mp4');
 
-        // Nolink turned off, plugins still enabled.
-        $t = $renderer->embed_url($url, 0, 0, '',
-                array(core_media::OPTION_NO_LINK => true));
-        $this->assert_contents(true, true, false, $t);
-    }
+        foreach ($mediaformats as $format) {
+            $url = new moodle_url('http://example.org/test.' . $format);
+            $textwithlink = $manager->embed_url($url);
+            $textwithoutlink = $manager->embed_url($url, 0, 0, '', array(core_media_manager::OPTION_NO_LINK => true));
 
-    /**
-     * Checks the contents of the resulting HTML code to ensure it used the
-     * correct embed method(s).
-     *
-     * @param bool $hasqt True if it should have QT embed code
-     * @param bool $hashtml5 True if it should have HTML5 embed code
-     * @param bool $haslink True if it should have a fallback link
-     * @param string $text HTML content
-     */
-    private function assert_contents($hasqt, $hashtml5, $haslink, $text) {
-        // I tried to avoid making it specific to the exact details of the html
-        // code, picking out only single key strings that would let it check
-        // whether final code contains the right things.
-        $qt = 'qtplugin.cab';
-        $html5 = '</video>';
-        $link = 'mediafallbacklink';
+            switch ($format) {
+                case 'mp3':
+                    $this->assertContains($test, $textwithlink);
+                    $this->assertNotContains($html5video, $textwithlink);
+                    $this->assertContains($html5audio, $textwithlink);
+                    $this->assertNotContains($swf, $textwithlink);
+                    $this->assertContains($link, $textwithlink);
 
-        $this->assertEquals($hasqt, self::str_contains($text, $qt));
-        $this->assertEquals($hashtml5, self::str_contains($text, $html5));
-        $this->assertEquals($haslink, self::str_contains($text, $link));
+                    $this->assertContains($test, $textwithoutlink);
+                    $this->assertNotContains($html5video, $textwithoutlink);
+                    $this->assertContains($html5audio, $textwithoutlink);
+                    $this->assertNotContains($swf, $textwithoutlink);
+                    $this->assertNotContains($link, $textwithoutlink);
+                    break;
+
+                case 'mp4':
+                    $this->assertContains($test, $textwithlink);
+                    $this->assertContains($html5video, $textwithlink);
+                    $this->assertNotContains($html5audio, $textwithlink);
+                    $this->assertNotContains($swf, $textwithlink);
+                    $this->assertContains($link, $textwithlink);
+
+                    $this->assertContains($test, $textwithoutlink);
+                    $this->assertContains($html5video, $textwithoutlink);
+                    $this->assertNotContains($html5audio, $textwithoutlink);
+                    $this->assertNotContains($swf, $textwithoutlink);
+                    $this->assertNotContains($link, $textwithoutlink);
+                    break;
+
+                default:
+                    break;
+            }
+        }
     }
 
     /**
@@ -268,111 +268,37 @@ class medialib_testcase extends advanced_testcase {
      * Check SWF works including the special option required to enable it
      */
     public function test_embed_url_swf() {
-        global $CFG, $PAGE;
-        $CFG->core_media_enable_swf = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
+        \core\plugininfo\media::set_enabled_plugins('swf');
+        $manager = core_media_manager::instance();
 
         // Without any options...
         $url = new moodle_url('http://example.org/test.swf');
-        $t = $renderer->embed_url($url);
-        $this->assertFalse(self::str_contains($t, '</object>'));
+        $t = $manager->embed_url($url);
+        $this->assertNotContains('</object>', $t);
 
         // ...and with the 'no it's safe, I checked it' option.
         $url = new moodle_url('http://example.org/test.swf');
-        $t = $renderer->embed_url($url, '', 0, 0, array(core_media::OPTION_TRUSTED => true));
-        $this->assertTrue(self::str_contains($t, '</object>'));
-    }
-
-    /**
-     * Test for core_media_renderer embed_url.
-     * Exercises all the basic formats not covered elsewhere.
-     */
-    public function test_embed_url_other_formats() {
-        global $CFG, $PAGE;
-
-        // Enable all players and get renderer.
-        $CFG->core_media_enable_html5audio = true;
-        $CFG->core_media_enable_mp3 = true;
-        $CFG->core_media_enable_flv = true;
-        $CFG->core_media_enable_wmp = true;
-        $CFG->core_media_enable_rm = true;
-        $CFG->core_media_enable_youtube = true;
-        $CFG->core_media_enable_vimeo = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
-
-        // Check each format one at a time. This is a basic check to be sure
-        // the HTML is included for files of the right type, not a test that
-        // the HTML itself is correct.
-
-        // Format: mp3.
-        $url = new moodle_url('http://example.org/test.mp3');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, 'core_media_mp3_'));
-
-        // Format: flv.
-        $url = new moodle_url('http://example.org/test.flv');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, 'core_media_flv_'));
-
-        // Format: wmp.
-        $url = new moodle_url('http://example.org/test.avi');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '6BF52A52-394A-11d3-B153-00C04F79FAA6'));
-
-        // Format: rm.
-        $url = new moodle_url('http://example.org/test.rm');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, 'CFCDAA03-8BE4-11cf-B84B-0020AFBBCCFA'));
-
-        // Format: youtube.
-        $url = new moodle_url('http://www.youtube.com/watch?v=vyrwMmsufJc');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</iframe>'));
-        $url = new moodle_url('http://www.youtube.com/v/vyrwMmsufJc');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</iframe>'));
-
-        // Format: youtube playlist.
-        $url = new moodle_url('http://www.youtube.com/view_play_list?p=PL6E18E2927047B662');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</iframe>'));
-        $url = new moodle_url('http://www.youtube.com/playlist?list=PL6E18E2927047B662');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</iframe>'));
-        $url = new moodle_url('http://www.youtube.com/p/PL6E18E2927047B662');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</iframe>'));
-
-        // Format: vimeo.
-        $url = new moodle_url('http://vimeo.com/1176321');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</iframe>'));
-
-        // Format: html5audio.
-        $this->pretend_to_be_firefox();
-        $url = new moodle_url('http://example.org/test.ogg');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, '</audio>'));
+        $t = $manager->embed_url($url, '', 0, 0, array(core_media_manager::OPTION_TRUSTED => true));
+        $this->assertContains('</object>', $t);
     }
 
     /**
      * Same as test_embed_url MP3 test, but for slash arguments.
      */
     public function test_slash_arguments() {
-        global $CFG, $PAGE;
 
         // Again we do not turn slasharguments actually on, because it has to
         // work regardless of the setting of that variable in case of handling
         // links created using previous setting.
 
-        // Enable MP3 and get renderer.
-        $CFG->core_media_enable_mp3 = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
+        // Enable player.
+        \core\plugininfo\media::set_enabled_plugins('html5audio');
+        $manager = core_media_manager::instance();
 
         // Format: mp3.
         $url = new moodle_url('http://example.org/pluginfile.php?file=x/y/z/test.mp3');
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, 'core_media_mp3_'));
+        $t = $manager->embed_url($url);
+        $this->assertContains('</audio>', $t);
     }
 
     /**
@@ -380,24 +306,22 @@ class medialib_testcase extends advanced_testcase {
      * Checks the EMBED_OR_BLANK option.
      */
     public function test_embed_or_blank() {
-        global $CFG, $PAGE;
-        $CFG->core_media_enable_html5audio = true;
+        \core\plugininfo\media::set_enabled_plugins('html5audio');
+        $manager = core_media_manager::instance();
         $this->pretend_to_be_firefox();
 
-        $renderer = new core_media_renderer_test($PAGE, '');
-
-        $options = array(core_media::OPTION_FALLBACK_TO_BLANK => true);
+        $options = array(core_media_manager::OPTION_FALLBACK_TO_BLANK => true);
 
         // Embed that does match something should still include the link too.
         $url = new moodle_url('http://example.org/test.ogg');
-        $t = $renderer->embed_url($url, '', 0, 0, $options);
-        $this->assertTrue(self::str_contains($t, '</audio>'));
-        $this->assertTrue(self::str_contains($t, 'mediafallbacklink'));
+        $t = $manager->embed_url($url, '', 0, 0, $options);
+        $this->assertContains('</audio>', $t);
+        $this->assertContains('mediafallbacklink', $t);
 
         // Embed that doesn't match something should be totally blank.
         $url = new moodle_url('http://example.org/test.mp4');
-        $t = $renderer->embed_url($url, '', 0, 0, $options);
-        $this->assertEquals('', $t);
+        $t = $manager->embed_url($url, '', 0, 0, $options);
+        $this->assertSame('', $t);
     }
 
     /**
@@ -406,31 +330,31 @@ class medialib_testcase extends advanced_testcase {
      * size support in html5video output.
      */
     public function test_embed_url_size() {
-        global $CFG, $PAGE;
+        global $CFG;
 
         // Technically this could break in every format and they handle size
         // in several different ways, but I'm too lazy to test it in every
         // format, so let's just pick one to check the values get passed
         // through.
-        $CFG->core_media_enable_html5video = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
+        \core\plugininfo\media::set_enabled_plugins('html5video');
+        $manager = core_media_manager::instance();
         $url = new moodle_url('http://example.org/test.mp4');
 
         // HTML5 default size - specifies core width and does not specify height.
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, 'width="' . CORE_MEDIA_VIDEO_WIDTH . '"'));
-        $this->assertFalse(self::str_contains($t, 'height'));
+        $t = $manager->embed_url($url);
+        $this->assertContains('width="' . $CFG->media_default_width . '"', $t);
+        $this->assertNotContains('height', $t);
 
         // HTML5 specified size - specifies both.
-        $t = $renderer->embed_url($url, '', '666', '101');
-        $this->assertTrue(self::str_contains($t, 'width="666"'));
-        $this->assertTrue(self::str_contains($t, 'height="101"'));
+        $t = $manager->embed_url($url, '', '666', '101');
+        $this->assertContains('width="666"', $t);
+        $this->assertContains('height="101"', $t);
 
         // HTML5 size specified in url, overrides call.
         $url = new moodle_url('http://example.org/test.mp4?d=123x456');
-        $t = $renderer->embed_url($url, '', '666', '101');
-        $this->assertTrue(self::str_contains($t, 'width="123"'));
-        $this->assertTrue(self::str_contains($t, 'height="456"'));
+        $t = $manager->embed_url($url, '', '666', '101');
+        $this->assertContains('width="123"', $t);
+        $this->assertContains('height="456"', $t);
     }
 
     /**
@@ -439,30 +363,30 @@ class medialib_testcase extends advanced_testcase {
      * name support in html5video output.
      */
     public function test_embed_url_name() {
-        global $CFG, $PAGE;
-
         // As for size this could break in every format but I'm only testing
         // html5video.
-        $CFG->core_media_enable_html5video = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
+        \core\plugininfo\media::set_enabled_plugins('html5video');
+        $manager = core_media_manager::instance();
         $url = new moodle_url('http://example.org/test.mp4');
 
         // HTML5 default name - use filename.
-        $t = $renderer->embed_url($url);
-        $this->assertTrue(self::str_contains($t, 'title="test.mp4"'));
+        $t = $manager->embed_url($url);
+        $this->assertContains('title="test.mp4"', $t);
 
         // HTML5 specified name - check escaping.
-        $t = $renderer->embed_url($url, 'frog & toad');
-        $this->assertTrue(self::str_contains($t, 'title="frog &amp; toad"'));
+        $t = $manager->embed_url($url, 'frog & toad');
+        $this->assertContains('title="frog &amp; toad"', $t);
     }
 
     /**
      * Test for core_media_renderer split_alternatives.
      */
     public function test_split_alternatives() {
+        $mediamanager = core_media_manager::instance();
+
         // Single URL - identical moodle_url.
         $mp4 = 'http://example.org/test.mp4';
-        $result = core_media::split_alternatives($mp4, $w, $h);
+        $result = $mediamanager->split_alternatives($mp4, $w, $h);
         $this->assertEquals($mp4, $result[0]->out(false));
 
         // Width and height weren't specified.
@@ -471,20 +395,20 @@ class medialib_testcase extends advanced_testcase {
 
         // Two URLs - identical moodle_urls.
         $webm = 'http://example.org/test.webm';
-        $result = core_media::split_alternatives("$mp4#$webm", $w, $h);
+        $result = $mediamanager->split_alternatives("$mp4#$webm", $w, $h);
         $this->assertEquals($mp4, $result[0]->out(false));
         $this->assertEquals($webm, $result[1]->out(false));
 
         // Two URLs plus dimensions.
         $size = 'd=400x280';
-        $result = core_media::split_alternatives("$mp4#$webm#$size", $w, $h);
+        $result = $mediamanager->split_alternatives("$mp4#$webm#$size", $w, $h);
         $this->assertEquals($mp4, $result[0]->out(false));
         $this->assertEquals($webm, $result[1]->out(false));
         $this->assertEquals(400, $w);
         $this->assertEquals(280, $h);
 
         // Two URLs plus legacy dimensions (use last one).
-        $result = core_media::split_alternatives("$mp4?d=1x1#$webm?$size", $w, $h);
+        $result = $mediamanager->split_alternatives("$mp4?d=1x1#$webm?$size", $w, $h);
         $this->assertEquals($mp4, $result[0]->out(false));
         $this->assertEquals($webm, $result[1]->out(false));
         $this->assertEquals(400, $w);
@@ -495,86 +419,79 @@ class medialib_testcase extends advanced_testcase {
      * Test for core_media_renderer embed_alternatives (with multiple urls)
      */
     public function test_embed_alternatives() {
-        global $PAGE, $CFG;
-
         // Most aspects of this are same as single player so let's just try
         // a single typical / complicated scenario.
 
-        // MP3, WebM and FLV.
+        // MP4, OGV, WebM and FLV.
         $urls = array(
             new moodle_url('http://example.org/test.mp4'),
+            new moodle_url('http://example.org/test.ogv'),
             new moodle_url('http://example.org/test.webm'),
             new moodle_url('http://example.org/test.flv'),
         );
 
-        // Enable html5 and flv.
-        $CFG->core_media_enable_html5video = true;
-        $CFG->core_media_enable_flv = true;
-        $renderer = new core_media_renderer_test($PAGE, '');
+        // Enable html5 and "test" ("test" first).
+        \core\plugininfo\media::set_enabled_plugins('test,html5video');
+        $manager = core_media_manager::instance();
 
         // Result should contain HTML5 with two sources + FLV.
-        $t = $renderer->embed_alternatives($urls);
+        $t = $manager->embed_alternatives($urls);
 
-        // HTML5 sources - mp4, not flv or webm (not supported in Safari).
-        $this->assertTrue(self::str_contains($t, '<source src="http://example.org/test.mp4"'));
-        $this->assertFalse(self::str_contains($t, '<source src="http://example.org/test.webm"'));
-        $this->assertFalse(self::str_contains($t, '<source src="http://example.org/test.flv"'));
+        // HTML5 sources - mp4, but not ogv, flv or webm (not supported in Safari).
+        $this->assertContains('<source src="http://example.org/test.mp4"', $t);
+        $this->assertNotContains('<source src="http://example.org/test.ogv"', $t);
+        $this->assertNotContains('<source src="http://example.org/test.webm"', $t);
+        $this->assertNotContains('<source src="http://example.org/test.flv"', $t);
 
         // FLV is before the video tag (indicating html5 is used as fallback to flv
         // and not vice versa).
-        $this->assertTrue((bool)preg_match('~core_media_flv_.*<video~s', $t));
+        $this->assertTrue((bool)preg_match('~mediaplugin_test.*<video~s', $t));
 
         // Do same test with firefox and check we get the webm and not mp4.
         $this->pretend_to_be_firefox();
-        $t = $renderer->embed_alternatives($urls);
+        $t = $manager->embed_alternatives($urls);
 
-        // HTML5 sources - webm, not not flv or mp4 (not supported in Firefox).
-        $this->assertFalse(self::str_contains($t, '<source src="http://example.org/test.mp4"'));
-        $this->assertTrue(self::str_contains($t, '<source src="http://example.org/test.webm"'));
-        $this->assertFalse(self::str_contains($t, '<source src="http://example.org/test.flv"'));
+        // HTML5 sources - mp4, ogv and webm, but not flv.
+        $this->assertContains('<source src="http://example.org/test.mp4"', $t);
+        $this->assertContains('<source src="http://example.org/test.ogv"', $t);
+        $this->assertContains('<source src="http://example.org/test.webm"', $t);
+        $this->assertNotContains('<source src="http://example.org/test.flv"', $t);
     }
 
     /**
-     * Checks if text contains a given string. Should be PHP built-in function,
-     * but oddly isn't.
-     *
-     * @param string $text Text
-     * @param string $value Value that should be contained within the text
-     * @return bool True if value is contained
+     * Make sure the instance() method returns singleton for the same page and different object for another page
      */
-    public static function str_contains($text, $value) {
-        return strpos($text, $value) !== false;
+    public function test_initialise() {
+        $moodlepage1 = new moodle_page();
+
+        $mediamanager1 = core_media_manager::instance($moodlepage1);
+        $mediamanager2 = core_media_manager::instance($moodlepage1);
+
+        $this->assertSame($mediamanager1, $mediamanager2);
+
+        $moodlepage3 = new moodle_page();
+        $mediamanager3 = core_media_manager::instance($moodlepage3);
+
+        $this->assertNotSame($mediamanager1, $mediamanager3);
     }
 
-    /**
-     * Converts moodle_url array into a single comma-separated string for
-     * easier testing.
-     *
-     * @param array $urls Array of moodle_urls
-     * @return string String containing those URLs, comma-separated
-     */
-    public static function string_urls($urls) {
-        $out = array();
-        foreach ($urls as $url) {
-            $out[] = $url->out(false);
-        }
-        return implode(',', $out);
-    }
 
     /**
-     * Converts associative array into a semicolon-separated string for easier
-     * testing.
-     *
-     * @param array $options Associative array
-     * @return string String of form 'a=b;c=d'
+     * Access list of players as string, shortening it by getting rid of
+     * repeated text.
+     * @param core_media_manager $manager The core_media_manager instance
+     * @return string Comma-separated list of players
      */
-    public static function string_options($options) {
+    public function get_players_test($manager) {
+        $method = new ReflectionMethod("core_media_manager", "get_players");
+        $method->setAccessible(true);
+        $players = $method->invoke($manager);
         $out = '';
-        foreach ($options as $key => $value) {
+        foreach ($players as $player) {
             if ($out) {
-                $out .= ';';
+                $out .= ', ';
             }
-            $out .= "$key=$value";
+            $out .= str_replace('core_media_player_', '', preg_replace('/^media_(.*)_plugin$/', '$1', get_class($player)));
         }
         return $out;
     }
@@ -583,7 +500,7 @@ class medialib_testcase extends advanced_testcase {
 /**
  * Media player stub for testing purposes.
  */
-class core_media_player_test extends core_media_player {
+class media_test_plugin extends core_media_player {
     /** @var array Array of supported extensions */
     public $ext;
     /** @var int Player rank */
@@ -596,15 +513,17 @@ class core_media_player_test extends core_media_player {
      * @param int $rank Player rank
      * @param array $ext Array of supported extensions
      */
-    public function __construct($num = 1, $rank = 13, $ext = array('tst', 'test')) {
+    public function __construct($num = 1, $rank = 13, $ext = array('mp3', 'flv', 'f4v', 'mp4')) {
         $this->ext = $ext;
         $this->rank = $rank;
         $this->num = $num;
     }
 
     public function embed($urls, $name, $width, $height, $options) {
-        return $this->num . ':' . medialib_test::string_urls($urls) .
-                ",$name,$width,$height,<!--FALLBACK-->," . medialib_test::string_options($options);
+        self::pick_video_size($width, $height);
+        $contents = "\ntestsource=". join("\ntestsource=", $urls) .
+            "\ntestname=$name\ntestwidth=$width\ntestheight=$height\n<!--FALLBACK-->\n";
+        return html_writer::span($contents, 'mediaplugin mediaplugin_test');
     }
 
     public function get_supported_extensions() {
@@ -612,28 +531,6 @@ class core_media_player_test extends core_media_player {
     }
 
     public function get_rank() {
-        return $this->rank;
-    }
-}
-
-/**
- * Media renderer override for testing purposes.
- */
-class core_media_renderer_test extends core_media_renderer {
-    /**
-     * Access list of players as string, shortening it by getting rid of
-     * repeated text.
-     * @return string Comma-separated list of players
-     */
-    public function get_players_test() {
-        $players = $this->get_players();
-        $out = '';
-        foreach ($players as $player) {
-            if ($out) {
-                $out .= ', ';
-            }
-            $out .= str_replace('core_media_player_', '', get_class($player));
-        }
-        return $out;
+        return 10;
     }
 }

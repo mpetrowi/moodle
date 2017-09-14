@@ -16,10 +16,9 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * @package    mod
- * @subpackage workshop
- * @copyright  2010 onwards Eloy Lafuente (stronk7) {@link http://stronk7.com}
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @package   mod_workshop
+ * @copyright 2010 onwards Eloy Lafuente (stronk7) {@link http://stronk7.com}
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 /**
@@ -105,7 +104,8 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
         $oldid = $data->id;
         $data->course = $this->get_courseid();
 
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
+        // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+        // See MDL-9367.
         $data->submissionstart = $this->apply_date_offset($data->submissionstart);
         $data->submissionend = $this->apply_date_offset($data->submissionend);
         $data->assessmentstart = $this->apply_date_offset($data->assessmentstart);
@@ -126,8 +126,6 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
         $data->workshopid = $this->get_new_parentid('workshop');
         $data->example = 1;
         $data->authorid = $this->task->get_userid();
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('workshop_submissions', $data);
         $this->set_mapping('workshop_examplesubmission', $oldid, $newitemid, true); // Mapping with files
@@ -141,11 +139,9 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
 
         $data->submissionid = $this->get_new_parentid('workshop_examplesubmission');
         $data->reviewerid = $this->task->get_userid();
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('workshop_assessments', $data);
-        $this->set_mapping('workshop_referenceassessment', $oldid, $newitemid);
+        $this->set_mapping('workshop_referenceassessment', $oldid, $newitemid, true); // Mapping with files
     }
 
     protected function process_workshop_exampleassessment($data) {
@@ -156,11 +152,9 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
 
         $data->submissionid = $this->get_new_parentid('workshop_examplesubmission');
         $data->reviewerid = $this->get_mappingid('user', $data->reviewerid);
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('workshop_assessments', $data);
-        $this->set_mapping('workshop_exampleassessment', $oldid, $newitemid);
+        $this->set_mapping('workshop_exampleassessment', $oldid, $newitemid, true); // Mapping with files
     }
 
     protected function process_workshop_submission($data) {
@@ -172,8 +166,6 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
         $data->workshopid = $this->get_new_parentid('workshop');
         $data->example = 0;
         $data->authorid = $this->get_mappingid('user', $data->authorid);
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('workshop_submissions', $data);
         $this->set_mapping('workshop_submission', $oldid, $newitemid, true); // Mapping with files
@@ -187,11 +179,9 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
 
         $data->submissionid = $this->get_new_parentid('workshop_submission');
         $data->reviewerid = $this->get_mappingid('user', $data->reviewerid);
-        $data->timecreated = $this->apply_date_offset($data->timecreated);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('workshop_assessments', $data);
-        $this->set_mapping('workshop_assessment', $oldid, $newitemid);
+        $this->set_mapping('workshop_assessment', $oldid, $newitemid, true); // Mapping with files
     }
 
     protected function process_workshop_aggregation($data) {
@@ -202,9 +192,9 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
 
         $data->workshopid = $this->get_new_parentid('workshop');
         $data->userid = $this->get_mappingid('user', $data->userid);
-        $data->timegraded = $this->apply_date_offset($data->timegraded);
 
         $newitemid = $DB->insert_record('workshop_aggregations', $data);
+        $this->set_mapping('workshop_aggregation', $oldid, $newitemid, true);
     }
 
     protected function after_execute() {
@@ -212,13 +202,26 @@ class restore_workshop_activity_structure_step extends restore_activity_structur
         $this->add_related_files('mod_workshop', 'intro', null);
         $this->add_related_files('mod_workshop', 'instructauthors', null);
         $this->add_related_files('mod_workshop', 'instructreviewers', null);
+        $this->add_related_files('mod_workshop', 'conclusion', null);
 
         // Add example submission related files, matching by 'workshop_examplesubmission' itemname
         $this->add_related_files('mod_workshop', 'submission_content', 'workshop_examplesubmission');
         $this->add_related_files('mod_workshop', 'submission_attachment', 'workshop_examplesubmission');
 
+        // Add reference assessment related files, matching by 'workshop_referenceassessment' itemname
+        $this->add_related_files('mod_workshop', 'overallfeedback_content', 'workshop_referenceassessment');
+        $this->add_related_files('mod_workshop', 'overallfeedback_attachment', 'workshop_referenceassessment');
+
+        // Add example assessment related files, matching by 'workshop_exampleassessment' itemname
+        $this->add_related_files('mod_workshop', 'overallfeedback_content', 'workshop_exampleassessment');
+        $this->add_related_files('mod_workshop', 'overallfeedback_attachment', 'workshop_exampleassessment');
+
         // Add submission related files, matching by 'workshop_submission' itemname
         $this->add_related_files('mod_workshop', 'submission_content', 'workshop_submission');
         $this->add_related_files('mod_workshop', 'submission_attachment', 'workshop_submission');
+
+        // Add assessment related files, matching by 'workshop_assessment' itemname
+        $this->add_related_files('mod_workshop', 'overallfeedback_content', 'workshop_assessment');
+        $this->add_related_files('mod_workshop', 'overallfeedback_attachment', 'workshop_assessment');
     }
 }

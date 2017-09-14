@@ -65,6 +65,10 @@ if ($ADMIN->fulltree) {
     $settings->add(new admin_setting_configselect('enrol_self/status',
         get_string('status', 'enrol_self'), get_string('status_desc', 'enrol_self'), ENROL_INSTANCE_DISABLED, $options));
 
+    $options = array(1  => get_string('yes'), 0 => get_string('no'));
+    $settings->add(new admin_setting_configselect('enrol_self/newenrols',
+        get_string('newenrols', 'enrol_self'), get_string('newenrols_desc', 'enrol_self'), 1, $options));
+
     $options = array(1  => get_string('yes'),
                      0 => get_string('no'));
     $settings->add(new admin_setting_configselect('enrol_self/groupkey',
@@ -107,6 +111,9 @@ if ($ADMIN->fulltree) {
     $settings->add(new admin_setting_configtext('enrol_self/maxenrolled',
         get_string('maxenrolled', 'enrol_self'), get_string('maxenrolled_help', 'enrol_self'), 0, PARAM_INT));
 
-    $settings->add(new admin_setting_configcheckbox('enrol_self/sendcoursewelcomemessage',
-        get_string('sendcoursewelcomemessage', 'enrol_self'), get_string('sendcoursewelcomemessage_help', 'enrol_self'), 1));
+    $settings->add(new admin_setting_configselect('enrol_self/sendcoursewelcomemessage',
+            get_string('sendcoursewelcomemessage', 'enrol_self'),
+            get_string('sendcoursewelcomemessage_help', 'enrol_self'),
+            ENROL_SEND_EMAIL_FROM_COURSE_CONTACT,
+            enrol_send_welcome_email_options()));
 }

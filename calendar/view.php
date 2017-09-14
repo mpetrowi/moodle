@@ -38,7 +38,12 @@
 //                                                                         //
 /////////////////////////////////////////////////////////////////////////////
 
-//  Display the calendar page.
+/**
+ * Display the calendar page.
+ * @copyright 2003 Jon Papaioannou
+ * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @package core_calendar
+ */
 
 require_once('../config.php');
 require_once($CFG->dirroot.'/course/lib.php');
@@ -46,30 +51,42 @@ require_once($CFG->dirroot.'/calendar/lib.php');
 
 $courseid = optional_param('course', SITEID, PARAM_INT);
 $view = optional_param('view', 'upcoming', PARAM_ALPHA);
-$day  = optional_param('cal_d', 0, PARAM_INT);
-$mon  = optional_param('cal_m', 0, PARAM_INT);
-$yr   = optional_param('cal_y', 0, PARAM_INT);
+$day = optional_param('cal_d', 0, PARAM_INT);
+$mon = optional_param('cal_m', 0, PARAM_INT);
+$year = optional_param('cal_y', 0, PARAM_INT);
+$time = optional_param('time', 0, PARAM_INT);
 
 $url = new moodle_url('/calendar/view.php');
+
+// If a day, month and year were passed then convert it to a timestamp. If these were passed
+// then we can assume the day, month and year are passed as Gregorian, as no where in core
+// should we be passing these values rather than the time. This is done for BC.
+if (!empty($day) && !empty($mon) && !empty($year)) {
+    if (checkdate($mon, $day, $year)) {
+        $time = make_timestamp($year, $mon, $day);
+    }
+}
+
+if (empty($time)) {
+    $time = time();
+}
+
 if ($courseid != SITEID) {
     $url->param('course', $courseid);
 }
+
 if ($view !== 'upcoming') {
+    $time = usergetmidnight($time);
     $url->param('view', $view);
 }
-if ($day !== 0) {
-    $url->param('cal_d', $day);
-}
-if ($mon !== 0) {
-    $url->param('cal_m', $mon);
-}
-if ($yr !== 0) {
-    $url->param('cal_y', $yr);
-}
+
+$url->param('time', $time);
+
 $PAGE->set_url($url);
 
 if ($courseid != SITEID && !empty($courseid)) {
-    $course = $DB->get_record('course', array('id' => $courseid));
+    // Course ID must be valid and existing.
+    $course = $DB->get_record('course', array('id' => $courseid), '*', MUST_EXIST);
     $courses = array($course->id => $course);
     $issite = false;
     navigation_node::override_active_url(new moodle_url('/course/view.php', array('id' => $course->id)));
@@ -78,22 +95,15 @@ if ($courseid != SITEID && !empty($courseid)) {
     $courses = calendar_get_default_courses();
     $issite = true;
 }
-require_course_login($course);
 
-$calendar = new calendar_information($day, $mon, $yr);
+require_login($course, false);
+
+$calendar = new calendar_information(0, 0, 0, $time);
 $calendar->prepare_for_view($course, $courses);
 
-$now = usergetdate(time());
 $pagetitle = '';
 
 $strcalendar = get_string('calendar', 'calendar');
-
-if (!checkdate($mon, $day, $yr)) {
-    $day = intval($now['mday']);
-    $mon = intval($now['mon']);
-    $yr = intval($now['year']);
-}
-$time = make_timestamp($yr, $mon, $day);
 
 switch($view) {
     case 'day':
@@ -113,7 +123,6 @@ switch($view) {
 $PAGE->set_pagelayout('standard');
 $PAGE->set_title("$course->shortname: $strcalendar: $pagetitle");
 $PAGE->set_heading($COURSE->fullname);
-$PAGE->set_button(calendar_preferences_button($course));
 
 $renderer = $PAGE->get_renderer('core_calendar');
 $calendar->add_sidecalendar_blocks($renderer, true, $view);
@@ -121,46 +130,36 @@ $calendar->add_sidecalendar_blocks($renderer, true, $view);
 echo $OUTPUT->header();
 echo $renderer->start_layout();
 echo html_writer::start_tag('div', array('class'=>'heightcontainer'));
+echo $OUTPUT->heading(get_string('calendar', 'calendar'));
 
-switch($view) {
-    case 'day':
-        echo $renderer->show_day($calendar);
-    break;
-    case 'month':
-        echo $renderer->show_month_detailed($calendar, $url);
-    break;
-    case 'upcoming':
-        $defaultlookahead = CALENDAR_DEFAULT_UPCOMING_LOOKAHEAD;
-        if (isset($CFG->calendar_lookahead)) {
-            $defaultlookahead = intval($CFG->calendar_lookahead);
-        }
-        $lookahead = get_user_preferences('calendar_lookahead', $defaultlookahead);
+if ($view == 'day' || $view == 'upcoming') {
+    switch($view) {
+        case 'day':
+            echo $renderer->show_day($calendar);
+        break;
+        case 'upcoming':
+            $defaultlookahead = CALENDAR_DEFAULT_UPCOMING_LOOKAHEAD;
+            if (isset($CFG->calendar_lookahead)) {
+                $defaultlookahead = intval($CFG->calendar_lookahead);
+            }
+            $lookahead = get_user_preferences('calendar_lookahead', $defaultlookahead);
 
-        $defaultmaxevents = CALENDAR_DEFAULT_UPCOMING_MAXEVENTS;
-        if (isset($CFG->calendar_maxevents)) {
-            $defaultmaxevents = intval($CFG->calendar_maxevents);
-        }
-        $maxevents = get_user_preferences('calendar_maxevents', $defaultmaxevents);
-        echo $renderer->show_upcoming_events($calendar, $lookahead, $maxevents);
-    break;
-}
-
-//Link to calendar export page.
-echo $OUTPUT->container_start('bottom');
-if (!empty($CFG->enablecalendarexport)) {
-    echo $OUTPUT->single_button(new moodle_url('export.php', array('course'=>$courseid)), get_string('exportcalendar', 'calendar'));
-    if (calendar_user_can_add_event($course)) {
-        echo $OUTPUT->single_button(new moodle_url('/calendar/managesubscriptions.php', array('course'=>$courseid)), get_string('managesubscriptions', 'calendar'));
+            $defaultmaxevents = CALENDAR_DEFAULT_UPCOMING_MAXEVENTS;
+            if (isset($CFG->calendar_maxevents)) {
+                $defaultmaxevents = intval($CFG->calendar_maxevents);
+            }
+            $maxevents = get_user_preferences('calendar_maxevents', $defaultmaxevents);
+            echo $renderer->show_upcoming_events($calendar, $lookahead, $maxevents);
+        break;
     }
-    if (isloggedin()) {
-        $authtoken = sha1($USER->id . $USER->password . $CFG->calendar_exportsalt);
-        $link = new moodle_url('/calendar/export_execute.php', array('preset_what'=>'all', 'preset_time'=>'recentupcoming', 'userid' => $USER->id, 'authtoken'=>$authtoken));
-        $icon = html_writer::empty_tag('img', array('src'=>$OUTPUT->pix_url('i/ical'), 'height'=>'14', 'width'=>'36', 'alt'=>get_string('ical', 'calendar'), 'title'=>get_string('quickdownloadcalendar', 'calendar')));
-        echo html_writer::tag('a', $icon, array('href'=>$link));
-    }
+} else if ($view == 'month') {
+    list($data, $template) = calendar_get_view($calendar, $view);
+    echo $renderer->render_from_template($template, $data);
 }
-
-echo $OUTPUT->container_end();
 echo html_writer::end_tag('div');
-echo $renderer->complete_layout();
+
+list($data, $template) = calendar_get_footer_options($calendar);
+echo $renderer->render_from_template($template, $data);
+
+$PAGE->requires->js_call_amd('core_calendar/calendar', 'init');
 echo $OUTPUT->footer();

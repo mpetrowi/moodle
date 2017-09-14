@@ -59,7 +59,8 @@ class completion_criteria_date extends completion_criteria {
      */
     public function config_form_display(&$mform, $data = null) {
         $mform->addElement('checkbox', 'criteria_date', get_string('enable'));
-        $mform->addElement('date_selector', 'criteria_date_value', get_string('afterspecifieddate', 'completion'));
+        $mform->addElement('date_selector', 'criteria_date_value', get_string('completionondatevalue', 'core_completion'));
+        $mform->disabledIf('criteria_date_value', 'criteria_date');
 
         // If instance of criteria exists
         if ($this->id) {
@@ -200,5 +201,30 @@ class completion_criteria_date extends completion_criteria {
         $details['status'] = '';
 
         return $details;
+    }
+
+    /**
+     * Return pix_icon for display in reports.
+     *
+     * @param string $alt The alt text to use for the icon
+     * @param array $attributes html attributes
+     * @return pix_icon
+     */
+    public function get_icon($alt, array $attributes = null) {
+        return new pix_icon('i/calendar', $alt, 'moodle', $attributes);
+    }
+
+    /**
+     * Shift the date when resetting course.
+     *
+     * @param int $courseid the course id
+     * @param int $timeshift number of seconds to shift date
+     * @return boolean was the operation successful?
+     */
+    public static function update_date($courseid, $timeshift) {
+        if ($criteria = self::fetch(array('course' => $courseid))) {
+            $criteria->timeend = $criteria->timeend + $timeshift;
+            $criteria->update();
+        }
     }
 }

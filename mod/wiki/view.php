@@ -18,9 +18,9 @@
 /**
  * This file contains all necessary code to view a wiki page
  *
- * @package mod-wiki-2.0
- * @copyrigth 2009 Marc Alier, Jordi Piguillem marc.alier@upc.edu
- * @copyrigth 2009 Universitat Politecnica de Catalunya http://www.upc.edu
+ * @package mod_wiki
+ * @copyright 2009 Marc Alier, Jordi Piguillem marc.alier@upc.edu
+ * @copyright 2009 Universitat Politecnica de Catalunya http://www.upc.edu
  *
  * @author Jordi Piguillem
  * @author Marc Alier
@@ -51,6 +51,8 @@ $edit = optional_param('edit', -1, PARAM_BOOL);
 $action = optional_param('action', '', PARAM_ALPHA);
 $swid = optional_param('swid', 0, PARAM_INT); // Subwiki ID
 
+$PAGE->force_settings_menu();
+
 /*
  * Case 0:
  *
@@ -67,6 +69,8 @@ if ($id) {
 
     // Checking course instance
     $course = $DB->get_record('course', array('id' => $cm->course), '*', MUST_EXIST);
+
+    require_login($course, true, $cm);
 
     // Checking wiki instance
     if (!$wiki = wiki_get_wiki($cm->instance)) {
@@ -138,6 +142,7 @@ if ($id) {
     // Checking course instance
     $course = $DB->get_record('course', array('id' => $cm->course), '*', MUST_EXIST);
 
+    require_login($course, true, $cm);
     /*
      * Case 2:
      *
@@ -166,9 +171,9 @@ if ($id) {
     }
 
     // Checking course instance
-    if (!$course = $DB->get_record("course", array("id" => $cm->course))) {
-        print_error('coursemisconf');
-    }
+    $course = $DB->get_record('course', array('id' => $cm->course), '*', MUST_EXIST);
+
+    require_login($course, true, $cm);
 
     $groupmode = groups_get_activity_groupmode($cm);
 
@@ -265,17 +270,12 @@ if ($id) {
     //     * Error. No more options
     //     */
 } else {
-    print_error('incorrectparameters');
+    print_error('invalidparameters', 'wiki');
 }
-require_login($course, true, $cm);
 
-$context = context_module::instance($cm->id);
-require_capability('mod/wiki:viewpage', $context);
-
-// Update 'viewed' state if required by completion system
-require_once($CFG->libdir . '/completionlib.php');
-$completion = new completion_info($course);
-$completion->set_module_viewed($cm);
+if (!wiki_user_can_view($subwiki, $wiki)) {
+    print_error('cannotviewpage', 'wiki');
+}
 
 if (($edit != - 1) and $PAGE->user_allowed_editing()) {
     $USER->editing = $edit;
@@ -283,24 +283,22 @@ if (($edit != - 1) and $PAGE->user_allowed_editing()) {
 
 $wikipage = new page_wiki_view($wiki, $subwiki, $cm);
 
-/*The following piece of code is used in order
- * to perform set_url correctly. It is necessary in order
- * to make page_wiki_view class know that this page
- * has been called via its id.
- */
-if ($id) {
-    $wikipage->set_coursemodule($id);
-}
-
 $wikipage->set_gid($currentgroup);
 $wikipage->set_page($page);
 
-if($pageid) {
-    add_to_log($course->id, 'wiki', 'view', "view.php?pageid=".$pageid, $pageid, $cm->id);
-} else if($id) {
-    add_to_log($course->id, 'wiki', 'view', "view.php?id=".$id, $id, $cm->id);
-} else if($wid && $title) {
-    add_to_log($course->id, 'wiki', 'view', "view.php?wid=".$wid."&title=".$title, $wid, $cm->id);
+$context = context_module::instance($cm->id);
+if ($pageid) {
+    wiki_page_view($wiki, $page, $course, $cm, $context, null, null, $subwiki);
+} else if ($id) {
+    wiki_view($wiki, $course, $cm, $context);
+} else if ($wid && $title) {
+    $other = array(
+        'title' => $title,
+        'wid' => $wid,
+        'group' => $gid,
+        'groupanduser' => $groupanduser
+    );
+    wiki_page_view($wiki, $page, $course, $cm, $context, $uid, $other, $subwiki);
 }
 
 $wikipage->print_header();

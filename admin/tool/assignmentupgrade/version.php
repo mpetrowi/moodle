@@ -24,7 +24,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2012061700;
-$plugin->requires  = 2012061700;
+$plugin->version   = 2017051500;
+$plugin->requires  = 2017050500;
 $plugin->component = 'tool_assignmentupgrade';
-$plugin->dependencies = array('mod_assign' => 2012061700);
+$plugin->dependencies = array('mod_assign' => 2017050500);

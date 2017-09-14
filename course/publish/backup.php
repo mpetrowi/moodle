@@ -20,15 +20,17 @@
 //                                                                       //
 ///////////////////////////////////////////////////////////////////////////
 
-/*
+/**
+ * This page display the publication backup form
+ *
  * @package    course
  * @subpackage publish
  * @author     Jerome Mouneyrac <jerome@mouneyrac.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL
  * @copyright  (C) 1999 onwards Martin Dougiamas  http://dougiamas.com
- *
- * This page display the publication backup form
  */
+
+define('NO_OUTPUT_BUFFERING', true);
 
 require_once('../../config.php');
 require_once($CFG->dirroot . '/backup/util/includes/backup_includes.php');
@@ -54,7 +56,7 @@ if (!has_capability('moodle/course:publish', context_course::instance($id))
 
 //page settings
 $PAGE->set_url('/course/publish/backup.php');
-$PAGE->set_pagelayout('course');
+$PAGE->set_pagelayout('incourse');
 $PAGE->set_title(get_string('course') . ': ' . $course->fullname);
 $PAGE->set_heading($course->fullname);
 
@@ -78,7 +80,7 @@ if ($backup->get_stage() !== backup_ui::STAGE_COMPLETE) {
     echo $OUTPUT->header();
     echo $OUTPUT->heading(get_string('publishcourseon', 'hub', !empty($hubname)?$hubname:$huburl), 3, 'main');
     if ($backup->enforce_changed_dependencies()) {
-        echo $renderer->dependency_notification(get_string('dependenciesenforced', 'backup'));
+        debugging('Your settings have been altered due to unmet dependencies', DEBUG_DEVELOPER);
     }
     echo $renderer->progress_bar($backup->get_progress_bar());
     echo $backup->display($renderer);

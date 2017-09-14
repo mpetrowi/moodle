@@ -1,5 +1,4 @@
 <?php
-
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -18,7 +17,7 @@
 /**
  * Strings for component 'core_enrol', language 'en', branch 'MOODLE_20_STABLE'
  *
- * @package    core
+ * @package    core_enrol
  * @subpackage enrol
  * @copyright  2010 Petr Skoda {@link http://skodak.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
@@ -26,6 +25,7 @@
 
 $string['actenrolshhdr'] = 'Available course enrolment plugins';
 $string['addinstance'] = 'Add method';
+$string['addinstanceanother'] = 'Add method and create another';
 $string['ajaxoneuserfound'] = '1 user found';
 $string['ajaxxusersfound'] = '{$a} users found';
 $string['ajaxnext25'] = 'Next 25...';
@@ -38,13 +38,21 @@ $string['defaultenrol_desc'] = 'It is possible to add this plugin to all new cou
 $string['deleteinstanceconfirm'] = 'You are about to delete the enrolment method "{$a->name}". All {$a->users} users currently enrolled using this method will be unenrolled and any course-related data such as users\' grades, group membership or forum subscriptions will be deleted.
 
 Are you sure you want to continue?';
+$string['deleteinstanceconfirmself'] = 'Are you really sure you want to delete instance "{$a->name}" that gives you access to this course? It is possible that you will not be able to access this course if you continue.';
 $string['deleteinstancenousersconfirm'] = 'You are about to delete the enrolment method "{$a->name}". Are you sure you want to continue?';
+$string['disableinstanceconfirmself'] = 'Are you really sure you want to disable instance "{$a->name}" that gives you access to this course? It is possible that you will not be able to access this course if you continue.';
 $string['durationdays'] = '{$a} days';
+$string['editenrolment'] = 'Edit enrolment';
+$string['edituserenrolment'] = 'Edit {$a}\'s enrolment';
 $string['enrol'] = 'Enrol';
 $string['enrolcandidates'] = 'Not enrolled users';
 $string['enrolcandidatesmatching'] = 'Matching not enrolled users';
 $string['enrolcohort'] = 'Enrol cohort';
 $string['enrolcohortusers'] = 'Enrol users';
+$string['enroldetails'] = 'Enrolment details';
+$string['eventenrolinstancecreated'] = 'Enrolment instance created';
+$string['eventenrolinstancedeleted'] = 'Enrolment instance deleted';
+$string['eventenrolinstanceupdated'] = 'Enrolment instance updated';
 $string['enrollednewusers'] = 'Successfully enrolled {$a} new users';
 $string['enrolledusers'] = 'Enrolled users';
 $string['enrolledusersmatching'] = 'Matching enrolled users';
@@ -52,14 +60,17 @@ $string['enrolme'] = 'Enrol me in this course';
 $string['enrolmentinstances'] = 'Enrolment methods';
 $string['enrolmentnew'] = 'New enrolment in {$a}';
 $string['enrolmentnewuser'] = '{$a->user} has enrolled in course "{$a->course}"';
+$string['enrolmentmethod'] = 'Enrolment method';
 $string['enrolments'] = 'Enrolments';
 $string['enrolmentoptions'] = 'Enrolment options';
 $string['enrolnotpermitted'] = 'You do not have permission or are not allowed to enrol someone in this course';
 $string['enrolperiod'] = 'Enrolment duration';
 $string['enrolusage'] = 'Instances / enrolments';
 $string['enrolusers'] = 'Enrol users';
+$string['enrolxusers'] = 'Enrol {$a} users';
 $string['enroltimecreated'] = 'Enrolment created';
 $string['enroltimeend'] = 'Enrolment ends';
+$string['enroltimeendinvalid'] = 'Enrolment end date must be after the enrolment start date';
 $string['enroltimestart'] = 'Enrolment starts';
 $string['errajaxfailedenrol'] = 'Failed to enrol user';
 $string['errajaxsearch'] = 'Error when searching users';
@@ -68,39 +79,55 @@ $string['errorenrolcohort'] = 'Error creating cohort sync enrolment instance in 
 $string['errorenrolcohortusers'] = 'Error enrolling cohort members in this course.';
 $string['errorthresholdlow'] = 'Notification threshold must be at least 1 day.';
 $string['errorwithbulkoperation'] = 'There was an error while processing your bulk enrolment change.';
+$string['eventuserenrolmentcreated'] = 'User enrolled in course';
+$string['eventuserenrolmentdeleted'] = 'User unenrolled from course';
+$string['eventuserenrolmentupdated'] = 'User unenrolment updated';
 $string['expirynotify'] = 'Notify before enrolment expires';
 $string['expirynotify_help'] = 'This setting determines whether enrolment expiry notification messages are sent.';
 $string['expirynotifyall'] = 'Enroller and enrolled user';
 $string['expirynotifyenroller'] = 'Enroller only';
 $string['expirynotifyhour'] = 'Hour to send enrolment expiry notifications';
 $string['expirythreshold'] = 'Notification threshold';
-$string['expirythreshold_help'] = 'How long before expiration should be users notified?';
+$string['expirythreshold_help'] = 'How long before enrolment expiry should users be notified?';
 $string['finishenrollingusers'] = 'Finish enrolling users';
+$string['foundxcohorts'] = 'Found {$a} cohorts';
+$string['instanceadded'] = 'Method added';
+$string['instanceeditselfwarning'] = 'Warning:';
+$string['instanceeditselfwarningtext'] = 'You are enrolled into this course through this enrolment method, changes may affect your access to this course.';
 $string['invalidenrolinstance'] = 'Invalid enrolment instance';
 $string['invalidrole'] = 'Invalid role';
 $string['manageenrols'] = 'Manage enrol plugins';
 $string['manageinstance'] = 'Manage';
+$string['migratetomanual'] = 'Migrate to manual enrolments';
 $string['nochange'] = 'No change';
 $string['noexistingparticipants'] = 'No existing participants';
-$string['noguestaccess'] = 'Guests can not access this course, please try to log in.';
+$string['nogroup'] = 'No group';
+$string['noguestaccess'] = 'Guests cannot access this course. Please log in.';
 $string['none'] = 'None';
 $string['notenrollable'] = 'You can not enrol yourself in this course.';
 $string['notenrolledusers'] = 'Other users';
 $string['otheruserdesc'] = 'The following users are not enrolled in this course but do have roles, inherited or assigned within it.';
 $string['participationactive'] = 'Active';
+$string['participationnotcurrent'] = 'Not current';
 $string['participationstatus'] = 'Status';
 $string['participationsuspended'] = 'Suspended';
 $string['periodend'] = 'until {$a}';
 $string['periodnone'] = 'enrolled {$a}';
 $string['periodstart'] = 'from {$a}';
 $string['periodstartend'] = 'from {$a->start} until {$a->end}';
+$string['proceedtocourse'] = 'Proceed to course content';
 $string['recovergrades'] = 'Recover user\'s old grades if possible';
 $string['rolefromthiscourse'] = '{$a->role} (Assigned in this course)';
 $string['rolefrommetacourse'] = '{$a->role} (Inherited from parent course)';
 $string['rolefromcategory'] = '{$a->role} (Inherited from course category)';
 $string['rolefromsystem'] = '{$a->role} (Assigned at site level)';
+$string['sendfromcoursecontact'] = 'From the course contact';
+$string['sendfromkeyholder'] = 'From the key holder';
+$string['sendfromnoreply'] = 'From the no-reply address';
 $string['startdatetoday'] = 'Today';
 $string['synced'] = 'Synced';
+$string['testsettings'] = 'Test settings';
+$string['testsettingsheading'] = 'Test enrol settings - {$a}';
 $string['totalenrolledusers'] = '{$a} enrolled users';
 $string['totalotherusers'] = '{$a} other users';
 $string['unassignnotpermitted'] = 'You do not have permission to unassign roles in this course';
@@ -109,15 +136,10 @@ $string['unenrolconfirm'] = 'Do you really want to unenrol user "{$a->user}" fro
 $string['unenrolme'] = 'Unenrol me from {$a}';
 $string['unenrolnotpermitted'] = 'You do not have permission or can not unenrol this user from this course.';
 $string['unenrolroleusers'] = 'Unenrol users';
-$string['uninstallconfirm'] = 'You are about to uninstall the enrolment plugin \'{$a}\'. This will result in the deletion of all data associated with this enrolment type, including users\' grades, group membership, forum subscriptions and any other course-related data.
-
-Are you SURE you want to continue?';
-$string['uninstalldelete'] = 'Delete all enrolments and uninstall';
-$string['uninstalldeletefiles'] = 'All data associated with the enrol plugin \'{$a->plugin}\' has been deleted from the database.  To complete the deletion (and prevent the plugin re-installing itself), you should now delete this directory from your server: {$a->directory}';
-$string['uninstallmigrate'] = 'Uninstall but keep all enrolments';
 $string['uninstallmigrating'] = 'Migrating "{$a}" enrolments';
 $string['unknowajaxaction'] = 'Unknown action requested';
 $string['unlimitedduration'] = 'Unlimited';
+$string['userremovedfromselectiona'] = 'User "{$a}" was removed from the selection.';
 $string['usersearch'] = 'Search ';
 $string['withselectedusers'] = 'With selected users';
 $string['extremovedaction'] = 'External unenrol action';

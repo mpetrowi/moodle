@@ -24,15 +24,19 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+defined('MOODLE_INTERNAL') || die();
+
 function xmldb_tool_customlang_upgrade($oldversion) {
-    global $CFG, $DB, $OUTPUT;
+    global $CFG;
 
-    $dbman = $DB->get_manager();
+    // Moodle v3.1.0 release upgrade line.
+    // Put any upgrade step following this.
 
+    // Automatically generated Moodle v3.2.0 release upgrade line.
+    // Put any upgrade step following this.
 
-    // Moodle v2.3.0 release upgrade line
-    // Put any upgrade step following this
-
+    // Automatically generated Moodle v3.3.0 release upgrade line.
+    // Put any upgrade step following this.
 
     return true;
 }

@@ -37,7 +37,7 @@ defined('MOODLE_INTERNAL') || die();
  * @copyright  2012 Sam Hemelryk
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class cachestore_mongodb implements cache_store {
+class cachestore_mongodb extends cache_store implements cache_is_configurable {
 
     /**
      * The name of the store
@@ -67,7 +67,7 @@ class cachestore_mongodb implements cache_store {
      * The Connection object
      * @var Mongo
      */
-    protected $connection;
+    protected $connection = false;
 
     /**
      * The Database Object
@@ -85,7 +85,7 @@ class cachestore_mongodb implements cache_store {
      * Determines if and what safe setting is to be used.
      * @var bool|int
      */
-    protected $usesafe = false;
+    protected $usesafe = true;
 
     /**
      * If set to true then multiple identifiers will be requested and used.
@@ -100,7 +100,25 @@ class cachestore_mongodb implements cache_store {
     protected $definitionhash = null;
 
     /**
-     * Constructs a new instance of the Mongo store but does not connect to it.
+     * Set to true once this store is ready to be initialised and used.
+     * @var bool
+     */
+    protected $isready = false;
+
+    /**
+     * Set to true if the Mongo extension is < version 1.3.
+     * If this is the case we must use the legacy Mongo class instead of MongoClient.
+     * Mongo is backwards compatible, although obviously deprecated.
+     * @var bool
+     */
+    protected $legacymongo = false;
+
+    /**
+     * Constructs a new instance of the Mongo store.
+     *
+     * Noting that this function is not an initialisation. It is used to prepare the store for use.
+     * The store will be initialised when required and will be provided with a cache_definition at that time.
+     *
      * @param string $name
      * @param array $configuration
      */
@@ -130,7 +148,17 @@ class cachestore_mongodb implements cache_store {
             $this->extendedmode = $configuration['extendedmode'];
         }
 
-        $this->isready = self::are_requirements_met();
+        // Test if the MongoClient class exists, if not we need to switch to legacy classes.
+        $this->legacymongo = (!class_exists('MongoClient'));
+
+        // MongoClient from Mongo 1.3 onwards. Mongo for earlier versions.
+        $class = ($this->legacymongo) ? 'Mongo' : 'MongoClient';
+        try {
+            $this->connection = new $class($this->server, $this->options);
+            $this->isready = true;
+        } catch (MongoConnectionException $e) {
+            // We only want to catch MongoConnectionExceptions here.
+        }
     }
 
     /**
@@ -138,15 +166,7 @@ class cachestore_mongodb implements cache_store {
      * @return bool
      */
     public static function are_requirements_met() {
-        return class_exists('Mongo');
-    }
-
-    /**
-     * Returns true if the user can add an instance of this store.
-     * @return bool
-     */
-    public static function can_add_instance() {
-        return true;
+        return class_exists('MongoClient') || class_exists('Mongo');
     }
 
     /**
@@ -155,7 +175,7 @@ class cachestore_mongodb implements cache_store {
      * @return int
      */
     public static function get_supported_features(array $configuration = array()) {
-        $supports = self::SUPPORTS_DATA_GUARANTEE;
+        $supports = self::SUPPORTS_DATA_GUARANTEE + self::DEREFERENCES_OBJECTS;
         if (array_key_exists('extendedmode', $configuration) && $configuration['extendedmode']) {
             $supports += self::SUPPORTS_MULTIPLE_IDENTIFIERS;
         }
@@ -168,13 +188,13 @@ class cachestore_mongodb implements cache_store {
      * @return int
      */
     public static function get_supported_modes(array $configuration = array()) {
-        return self::MODE_APPLICATION + self::MODE_SESSION;
+        return self::MODE_APPLICATION;
     }
 
     /**
      * Initialises the store instance for use.
      *
-     * This function is reponsible for making the connection.
+     * Once this has been done the cache is all set to be used.
      *
      * @param cache_definition $definition
      * @throws coding_exception
@@ -183,14 +203,17 @@ class cachestore_mongodb implements cache_store {
         if ($this->is_initialised()) {
             throw new coding_exception('This mongodb instance has already been initialised.');
         }
-        $this->definitionhash = $definition->generate_definition_hash();
-        $this->connection = new Mongo($this->server, $this->options);
         $this->database = $this->connection->selectDB($this->databasename);
+        $this->definitionhash = 'm'.$definition->generate_definition_hash();
         $this->collection = $this->database->selectCollection($this->definitionhash);
-        $this->collection->ensureIndex(array('key' => 1), array(
-            'safe' => $this->usesafe,
-            'name' => 'idx_key'
-        ));
+
+        $options = array('name' => 'idx_key');
+        if ($this->legacymongo) {
+            $options['safe'] = $this->usesafe;
+        } else {
+            $options['w'] = $this->usesafe ? 1 : 0;
+        }
+        $this->collection->ensureIndex(array('key' => 1), $options);
     }
 
     /**
@@ -219,27 +242,11 @@ class cachestore_mongodb implements cache_store {
     }
 
     /**
-     * Returns true if this store guarantees its data is there once set.
-     * @return bool
-     */
-    public function supports_data_guarantee() {
-        return true;
-    }
-
-    /**
      * Returns true if this store is making use of multiple identifiers.
      * @return bool
      */
-    public function supports_multiple_indentifiers() {
+    public function supports_multiple_identifiers() {
         return $this->extendedmode;
-    }
-
-    /**
-     * Returns true if this store supports native TTL.
-     * @return bool
-     */
-    public function supports_native_ttl() {
-        return false;;
     }
 
     /**
@@ -284,11 +291,7 @@ class cachestore_mongodb implements cache_store {
         $cursor = $this->collection->find($query);
         $results = array();
         foreach ($cursor as $result) {
-            if (array_key_exists('key', $result)) {
-                $id = $result[$key];
-            } else {
-                $id = (string)$result['key'];
-            }
+            $id = (string)$result['key'];
             $results[$id] = unserialize($result['data']);
         }
         foreach ($keys as $key) {
@@ -315,13 +318,25 @@ class cachestore_mongodb implements cache_store {
             $record = $key;
         }
         $record['data'] = serialize($data);
-        $options = array(
-            'upsert' => true,
-            'safe' => $this->usesafe
-        );
+        $options = array('upsert' => true);
+        if ($this->legacymongo) {
+            $options['safe'] = $this->usesafe;
+        } else {
+            $options['w'] = $this->usesafe ? 1 : 0;
+        }
         $this->delete($key);
         $result = $this->collection->insert($record, $options);
-        return $result;
+        if ($result === true) {
+            // Safe mode is off.
+            return true;
+        } else if (is_array($result)) {
+            if (empty($result['ok']) || isset($result['err'])) {
+                return false;
+            }
+            return true;
+        }
+        // Who knows?
+        return false;
     }
 
     /**
@@ -336,11 +351,11 @@ class cachestore_mongodb implements cache_store {
         $count = 0;
         foreach ($keyvaluearray as $pair) {
             $result = $this->set($pair['key'], $pair['value']);
-            if ($result === true || (is_array($result)) && !empty($result['ok'])) {
+            if ($result === true) {
                  $count++;
             }
         }
-        return;
+        return $count;
     }
 
     /**
@@ -357,15 +372,28 @@ class cachestore_mongodb implements cache_store {
         } else {
             $criteria = $key;
         }
-        $options = array(
-            'justOne' => false,
-            'safe' => $this->usesafe
-        );
-        $result = $this->collection->remove($criteria, $options);
-        if ($result === false || (is_array($result) && !array_key_exists('ok', $result)) || $result === 0) {
-            return false;
+        $options = array('justOne' => false);
+        if ($this->legacymongo) {
+            $options['safe'] = $this->usesafe;
+        } else {
+            $options['w'] = $this->usesafe ? 1 : 0;
         }
-        return !empty($result['ok']);
+        $result = $this->collection->remove($criteria, $options);
+
+        if ($result === true) {
+            // Safe mode.
+            return true;
+        } else if (is_array($result)) {
+            if (empty($result['ok']) || isset($result['err'])) {
+                return false;
+            } else if (empty($result['n'])) {
+                // Nothing was removed.
+                return false;
+            }
+            return true;
+        }
+        // Who knows?
+        return false;
     }
 
     /**
@@ -390,8 +418,12 @@ class cachestore_mongodb implements cache_store {
      * @return boolean True on success. False otherwise.
      */
     public function purge() {
-        $this->collection->drop();
-        $this->collection = $this->database->selectCollection($this->definitionhash);
+        if ($this->isready) {
+            $this->collection->drop();
+            $this->collection = $this->database->selectCollection($this->definitionhash);
+        }
+
+        return true;
     }
 
     /**
@@ -419,16 +451,74 @@ class cachestore_mongodb implements cache_store {
             $return['usesafe'] = true;
             if (!empty($data->usesafevalue)) {
                 $return['usesafe'] = (int)$data->usesafevalue;
+                $return['usesafevalue'] = $return['usesafe'];
             }
         }
         return $return;
     }
 
     /**
+     * Allows the cache store to set its data against the edit form before it is shown to the user.
+     *
+     * @param moodleform $editform
+     * @param array $config
+     */
+    public static function config_set_edit_form_data(moodleform $editform, array $config) {
+        $data = array();
+        if (!empty($config['server'])) {
+            $data['server'] = $config['server'];
+        }
+        if (!empty($config['database'])) {
+            $data['database'] = $config['database'];
+        }
+        if (isset($config['extendedmode'])) {
+            $data['extendedmode'] = (bool)$config['extendedmode'];
+        }
+        if (!empty($config['username'])) {
+            $data['username'] = $config['username'];
+        }
+        if (!empty($config['password'])) {
+            $data['password'] = $config['password'];
+        }
+        if (!empty($config['replicaset'])) {
+            $data['replicaset'] = $config['replicaset'];
+        }
+        if (isset($config['usesafevalue'])) {
+            $data['usesafe'] = true;
+            $data['usesafevalue'] = (int)$data['usesafe'];
+        } else if (isset($config['usesafe'])) {
+            $data['usesafe'] = (bool)$config['usesafe'];
+        }
+        $editform->set_data($data);
+    }
+
+    /**
      * Performs any necessary clean up when the store instance is being deleted.
      */
-    public function cleanup() {
-        $this->purge();
+    public function instance_deleted() {
+        // We can't use purge here that acts upon a collection.
+        // Instead we must drop the named database.
+        if ($this->connection) {
+            $connection = $this->connection;
+        } else {
+            try {
+                // MongoClient from Mongo 1.3 onwards. Mongo for earlier versions.
+                $class = ($this->legacymongo) ? 'Mongo' : 'MongoClient';
+                $connection = new $class($this->server, $this->options);
+            } catch (MongoConnectionException $e) {
+                // We only want to catch MongoConnectionExceptions here.
+                // If the server cannot be connected to we cannot clean it.
+                return;
+            }
+        }
+        $database = $connection->selectDB($this->databasename);
+        $database->drop();
+        $connection = null;
+        $database = null;
+        // Explicitly unset things to cause a close.
+        $this->collection = null;
+        $this->database = null;
+        $this->connection = null;
     }
 
     /**
@@ -446,7 +536,6 @@ class cachestore_mongodb implements cache_store {
         if (empty($config->testserver)) {
             return false;
         }
-
         $configuration = array();
         $configuration['server'] = $config->testserver;
         if (!empty($config->testreplicaset)) {
@@ -461,17 +550,37 @@ class cachestore_mongodb implements cache_store {
         if (!empty($config->testdatabase)) {
             $configuration['database'] = $config->testdatabase;
         }
-        if (!empty($config->testusesafe)) {
-            $configuration['usesafe'] = $config->testusesafe;
-        }
+        $configuration['usesafe'] = 1;
         if (!empty($config->testextendedmode)) {
             $configuration['extendedmode'] = (bool)$config->testextendedmode;
         }
 
         $store = new cachestore_mongodb('Test mongodb', $configuration);
+        if (!$store->is_ready()) {
+            return false;
+        }
         $store->initialise($definition);
 
         return $store;
+    }
+
+
+    /**
+     * Generates an instance of the cache store that can be used for testing.
+     *
+     * @param cache_definition $definition
+     * @return false
+     */
+    public static function unit_test_configuration() {
+        $configuration = array();
+        $configuration['usesafe'] = 1;
+
+        // If the configuration is not defined correctly, return only the configuration know about.
+        if (defined('TEST_CACHESTORE_MONGODB_TESTSERVER')) {
+            $configuration['servers'] = explode("\n", TEST_CACHESTORE_MONGODB_TESTSERVER);
+        }
+
+        return $configuration;
     }
 
     /**
@@ -480,5 +589,17 @@ class cachestore_mongodb implements cache_store {
      */
     public function my_name() {
         return $this->name;
+    }
+
+    /**
+     * Returns true if this cache store instance is both suitable for testing, and ready for testing.
+     *
+     * Cache stores that support being used as the default store for unit and acceptance testing should
+     * override this function and return true if there requirements have been met.
+     *
+     * @return bool
+     */
+    public static function ready_to_be_used_for_testing() {
+        return defined('TEST_CACHESTORE_MONGODB_TESTSERVER');
     }
 }

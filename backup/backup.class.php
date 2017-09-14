@@ -51,8 +51,25 @@ abstract class backup implements checksumable {
 
     // Predefined modes (purposes) of the backup
     const MODE_GENERAL   = 10;
+
+    /**
+     * This is used for importing courses, and for duplicating activities.
+     *
+     * This mode will ensure that files are not included in the backup generation, and
+     * during a restore they are copied from the existing file record.
+     */
     const MODE_IMPORT    = 20;
     const MODE_HUB       = 30;
+
+    /**
+     * This mode is intended for duplicating courses and cases where the backup target is
+     * within the same site.
+     *
+     * This mode will ensure that files are not included in the backup generation, and
+     * during a restore they are copied from the existing file record.
+     *
+     * For creating a backup for archival purposes or greater longevity, use MODE_GENERAL.
+     */
     const MODE_SAMESITE  = 40;
     const MODE_AUTOMATED = 50;
     const MODE_CONVERTED = 60;
@@ -108,9 +125,22 @@ abstract class backup implements checksumable {
     const OPERATION_BACKUP  ='backup'; // We are performing one backup
     const OPERATION_RESTORE ='restore';// We are performing one restore
 
-    // Version (to keep CFG->backup_version (and release) updated automatically)
-    const VERSION = 2012061800;
-    const RELEASE = '2.3';
+    // Options for "Include enrolment methods" restore setting.
+    const ENROL_NEVER     = 0;
+    const ENROL_WITHUSERS = 1;
+    const ENROL_ALWAYS    = 2;
+
+    // Version and release (to keep CFG->backup_version (and release) updated automatically).
+    /**
+     * Usually same than major release version, this is used to mark important
+     * point is backup when some behavior/approach channged, in order to allow
+     * conditional coding based on it.
+     */
+    const VERSION = 2017051500;
+    /**
+     * Usually same than major release zero version, mainly for informative/historic purposes.
+     */
+    const RELEASE = '3.4';
 }
 
 /*
